@@ -1,5 +1,5 @@
 import type { On } from 'claude-code'
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 
 const band = (surface: 'desktop' | 'terminal', isWorking: boolean) =>
   ({
@@ -18,18 +18,20 @@ const band = (surface: 'desktop' | 'terminal', isWorking: boolean) =>
   }) as const
 
 const engine = (on: On) => {
+  const clock = mock.clock(on)
   on('session.start', (_, e) => ({ cwd: e.cwd }))
-  on('clock.every', () => ({ value: undefined }))
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('ui.render', ($, e) => {
     const { Text } = $.ui.resolve(e)
 
     return <Text>engine</Text>
   })
+
+  return clock
 }
 
 test('Clawd lives in the band: dozing, then pacing once a turn starts', async ($, on) => {
-  engine(on)
+  const clock = engine(on)
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
 
   const resting = await $.ui.mount(band('desktop', false))
@@ -37,6 +39,8 @@ test('Clawd lives in the band: dozing, then pacing once a turn starts', async ($
   await resting.unmount()
 
   await $.turn.start({ text: 'go', turnId: 't1' })
+  // Clawd first gets up from its doze, then starts to pace.
+  await clock.advance(1000)
 
   const working = await $.ui.mount(band('desktop', true))
   expect((await working.find({ type: 'Svg' }))?.props.alt).toBe('Clawd paces back and forth, thinking')
