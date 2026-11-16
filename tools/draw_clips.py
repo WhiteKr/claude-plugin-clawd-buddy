@@ -289,9 +289,57 @@ def searching():
     return frames, loop_from, outro_from
 
 
+# Crab dance (꽃게춤): Clawd bobs up and down on the spot, squatting and
+# springing up on each beat, one claw thrown overhead snapping open and shut
+# while the other pumps at shoulder height, the claws trading every beat and
+# the legs stamping in pairs.
+
+def dance_claw(g, side, height, dy, open_=False):
+    """Draw the left claw, mirrored about the body for the right one."""
+    claw = Grid()
+    if height == 'mid':
+        claw.fill(3, 9 + dy, 6, 12 + dy, 'O')
+    else:
+        claw.fill(2, 1 + dy, 5, 4 + dy, 'O')
+        claw.line((5, 4 + dy), (7, 6 + dy), 'O')
+        if open_:
+            claw.clear(3, 1 + dy, 4, 2 + dy)
+    for (x, y), c in claw.cells.items():
+        g.cells[(x if side == 'left' else 29 - x, y)] = c
+
+
+def dance_frame(dy, left, right, stamp=None, snap=False, eye='open'):
+    """dy lifts (-1) or squats (+1) the body over feet planted on the ground."""
+    g = Grid()
+    g.fill(7, 7 + dy, 22, 18 + dy, 'O')
+    dance_claw(g, 'left', left, dy, snap and left == 'up')
+    dance_claw(g, 'right', right, dy, snap and right == 'up')
+    for x in (9, 19):
+        g.fill(x, (9 if eye == 'open' else 10) + dy, x + 1, 10 + dy, 'K')
+    for i, x in enumerate((7, 11, 17, 21)):
+        lifted = stamp is not None and i % 2 == stamp and dy <= 0
+        g.fill(x, 19 + dy, x + 1, 21 if lifted else 22, 'O')
+    return g
+
+
+def dance():
+    frames = [dance_frame(0, 'mid', 'mid'), dance_frame(1, 'mid', 'mid', eye='blink')]
+    loop_from = len(frames)
+    for beat in range(8):
+        up, mid = ('left', 'right') if beat % 2 == 0 else ('right', 'left')
+        pose = lambda h: (h if up == 'left' else 'mid', h if up == 'right' else 'mid')
+        l, r = pose('up')
+        frames += [dance_frame(1, l, r, eye='blink'), dance_frame(0, l, r, beat % 2, snap=True),
+                   dance_frame(-1, l, r, beat % 2, snap=True), dance_frame(-1, l, r, beat % 2),
+                   dance_frame(0, l, r, beat % 2, snap=True), dance_frame(1, 'mid', 'mid', eye='blink')]
+    outro_from = len(frames)
+    frames += [dance_frame(0, 'mid', 'mid'), standing(), standing()]
+    return frames, loop_from, outro_from
+
+
 # Each clip returns its frames, where its loop starts, and where its outro starts.
 CLIPS = {name: (lambda name=name: art(name)) for name in ('walk', 'laptop', 'snooze', 'stretch')}
-CLIPS.update({'read': reading, 'search': searching})
+CLIPS.update({'read': reading, 'search': searching, 'dance': dance})
 
 
 def runs(cells, color):

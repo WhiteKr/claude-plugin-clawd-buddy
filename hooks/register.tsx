@@ -58,7 +58,7 @@ const PERFORMANCE: Record<Activity, Performance> = {
   editing: { loop: 'laptop', alt: 'Clawd types on a laptop' },
   running: { loop: 'laptop', alt: 'Clawd runs a command on a laptop' },
   waiting: { loop: 'stretch', alt: 'Clawd stretches while waiting for you' },
-  done: { intro: 'stretch', loop: 'snooze', alt: 'Clawd stretches, done, then dozes off' },
+  done: { intro: 'dance', loop: 'snooze', alt: 'Clawd does a little crab dance, done, then dozes off' },
 }
 
 const WIDTH = CLIP_BOX.width * APP_SCALE
