@@ -291,9 +291,9 @@ def searching():
 
 # Crab dance (꽃게춤): Clawd bobs and weaves on the spot with its feet planted,
 # the body tracing a small U: up on the left, ducking through the middle, up
-# on the right and back. One claw is pumped high on the side the
-# body rises toward while the other sits a little raised. The claws keep their
-# shape and only move, as elsewhere.
+# on the right and back. The claw on the rising side is pumped high while the
+# other sits a little raised. The claws keep their shape and only move, as
+# elsewhere.
 
 CLAW_ROW = {'up': 5, 'mid': 9}
 
