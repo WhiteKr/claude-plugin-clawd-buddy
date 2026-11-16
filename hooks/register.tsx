@@ -61,6 +61,12 @@ const PERFORMANCE: Record<Activity, Performance> = {
   done: { intro: 'dance', loop: 'snooze', alt: 'Clawd does a little crab dance, done, then dozes off' },
 }
 
+// Alone in the band, Clawd strolls across it while thinking: each tick moves
+// it this share of the room beside it, about 48px a second on a 700px band.
+const STROLL_STEP = 0.007
+// Walk frames from here on are the outro's standing pose: Clawd stops there.
+const STRIDES = 16
+
 const WIDTH = CLIP_BOX.width * APP_SCALE
 const HEIGHT = CLIP_BOX.height * APP_SCALE
 
@@ -108,14 +114,31 @@ const carryOn = ({ intro, loop }: Performance, { name, index }: Frame): number |
 
 // The desktop strips CSS animation from plugin SVG while it composites in
 // software, so each frame is drawn still and the tick steps them.
-const picture = ({ name, index }: Frame, alt: string): Picture => {
+// A stroll to the left mirrors the walk, so Clawd faces the way it goes.
+const picture = ({ name, index }: Frame, alt: string, at = 0, mirrored = false): Picture => {
   const { groups, frames } = CLIPS[name]
-  const markup = (frames[index] ?? []).map(g => groups[g]).join('')
+  const drawn = (frames[index] ?? []).map(g => groups[g]).join('')
+  const markup = mirrored
+    ? `<g transform="translate(${2 * CLIP_BOX.x + CLIP_BOX.width} 0) scale(-1 1)">${drawn}</g>`
+    : drawn
 
   return {
     source: `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="${CLIP_BOX.x} ${CLIP_BOX.y} ${CLIP_BOX.width} ${CLIP_BOX.height}" shape-rendering="crispEdges">${markup}</svg>`,
     alt,
+    at,
   }
+}
+
+const strolling = ({ name, index }: Frame) => name === 'walk' && index < STRIDES
+
+// Steps along the band, turning at either end. `at` is the share of the room
+// left of Clawd, from 0 at the left end to 1 at the right.
+const stroll = (at: number, heading: 1 | -1): { at: number; heading: 1 | -1 } => {
+  const next = at + heading * STROLL_STEP
+
+  if (next >= 1) return { at: 1, heading: -1 }
+  if (next <= 0) return { at: 0, heading: 1 }
+  return { at: next, heading }
 }
 
 const running: Activity[] = []
@@ -123,6 +146,7 @@ let activity: Activity = 'idle'
 let tick = 0
 let scene: { activity: Activity; since: number } = { activity, since: 0 }
 let exit: { frames: Frame[]; since: number } | undefined
+let place: { at: number; heading: 1 | -1 } = { at: 0, heading: 1 }
 let shown = picture(playing(PERFORMANCE[activity], 0), PERFORMANCE[activity].alt)
 
 const act = (next: Activity) => {
@@ -152,7 +176,13 @@ const advance = (): Picture => {
   const { alt } = PERFORMANCE[scene.activity]
   const frame = exit?.frames[framesSince(exit.since)] ?? playing(PERFORMANCE[scene.activity], framesSince(scene.since))
 
-  return picture(frame, alt)
+  const walking = strolling(frame)
+
+  if (walking) {
+    place = stroll(place.at, place.heading)
+  }
+
+  return picture(frame, alt, place.at, walking && place.heading < 0)
 }
 
 export const register: Register = on => {
@@ -162,7 +192,7 @@ export const register: Register = on => {
       tick += 1
       const now = advance()
 
-      if (now.source !== shown.source || now.alt !== shown.alt) {
+      if (now.source !== shown.source || now.alt !== shown.alt || now.at !== shown.at) {
         shown = now
         void $.state.set(PICTURE, shown)
       }
@@ -227,10 +257,25 @@ export const register: Register = on => {
     const { Box, Svg } = $.ui.resolve(e)
     const now = (await $.state.get(PICTURE)).value ?? shown
     const otherRows = e.props.rows.filter(row => row.plugin !== $.plugin.name)
+    const clawd = <Svg source={now.source} alt={now.alt} width={WIDTH} height={HEIGHT} />
+
+    // With no other rows the band is Clawd's alone: the two spacers split the
+    // room around it, so `at` places it anywhere from the left end to the right.
+    if (otherRows.length === 0) {
+      const at = now.at ?? 0
+
+      return (
+        <Box flexDirection="row" alignItems="center">
+          <Box flexGrow={at} />
+          {clawd}
+          <Box flexGrow={1 - at} />
+        </Box>
+      )
+    }
 
     return (
       <Box flexDirection="row" alignItems="center" gap={1}>
-        <Svg {...now} width={WIDTH} height={HEIGHT} />
+        {clawd}
         <Box flexDirection="column" flexGrow={1}>
           {await next({ ...e, props: { ...e.props, rows: otherRows } })}
         </Box>
