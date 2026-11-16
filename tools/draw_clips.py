@@ -290,15 +290,17 @@ def searching():
 
 
 # Crab dance (꽃게춤): Clawd bobs up and down on the spot, squatting and
-# springing up on each beat, one claw pumped high beside the head while the
+# springing up on each beat and swaying a step left on one rise and right on
+# the next, back to the middle each time it lands, one claw pumped high beside the head while the
 # other sits a little raised, the claws trading every beat and the legs
 # stamping in pairs. The claws keep their shape and only move, as elsewhere.
 
 CLAW_ROW = {'up': 5, 'mid': 9}
 
 
-def dance_frame(dy, left, right, stamp=None, eye='open'):
-    """dy lifts (-1) or squats (+1) the body over feet planted on the ground."""
+def dance_frame(dy, left, right, stamp=None, eye='open', dx=0):
+    """dy lifts (-1) or squats (+1) the body over feet planted on the ground,
+    and dx sways the whole crab sideways."""
     g = Grid()
     g.fill(7, 7 + dy, 22, 18 + dy, 'O')
     g.fill(3, CLAW_ROW[left] + dy, 6, CLAW_ROW[left] + 3 + dy, 'O')
@@ -308,6 +310,7 @@ def dance_frame(dy, left, right, stamp=None, eye='open'):
     for i, x in enumerate((7, 11, 17, 21)):
         lifted = stamp is not None and i % 2 == stamp and dy <= 0
         g.fill(x, 19 + dy, x + 1, 21 if lifted else 22, 'O')
+    g.cells = {(x + dx, y): c for (x, y), c in g.cells.items()}
     return g
 
 
@@ -317,8 +320,9 @@ def dance():
     for beat in range(8):
         side = beat % 2
         l, r = ('up', 'mid') if side == 0 else ('mid', 'up')
-        frames += [dance_frame(1, l, r, eye='blink'), dance_frame(0, l, r, side), dance_frame(-1, l, r, side),
-                   dance_frame(-1, l, r, side), dance_frame(0, l, r, side), dance_frame(1, 'mid', 'mid', eye='blink')]
+        dx = -1 if side == 0 else 1
+        frames += [dance_frame(1, l, r, eye='blink'), dance_frame(0, l, r, side), dance_frame(-1, l, r, side, dx=dx),
+                   dance_frame(-1, l, r, side, dx=dx), dance_frame(0, l, r, side), dance_frame(1, 'mid', 'mid', eye='blink')]
     outro_from = len(frames)
     frames += [dance_frame(0, 'mid', 'mid'), standing(), standing()]
     return frames, loop_from, outro_from
