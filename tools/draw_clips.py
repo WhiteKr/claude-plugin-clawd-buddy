@@ -300,22 +300,23 @@ CLAW_ROW = {'up': 5, 'mid': 9}
 
 def dance_frame(dy, dx=0, up=None, eye='open'):
     """dy lifts (-1) or squats (+1) the body and dx sways it sideways, over
-    feet that stay where they stand. A swayed body also tilts that way, drawn
-    as in the stretch clip: the top steps up on the far side and is cut on the
-    near side, the near edge turns dark, and the far eye rides a row higher."""
+    feet that stay where they stand. A swayed body also tilts up on that side,
+    with the raised claw, drawn as in the stretch clip: the top steps up on the
+    raised side and is cut on the other, whose edge turns dark, and the eye on
+    the raised side rides a row higher."""
     g = Grid()
     g.fill(7, 7 + dy, 22, 18 + dy, 'O')
-    near, far = (7, 19) if dx < 0 else (22, 9)
+    low, high = (22, 9) if dx < 0 else (7, 19)
     if dx:
-        raised, cut = ((15, 22), (7, 10)) if dx < 0 else ((7, 14), (19, 22))
+        raised, cut = ((7, 14), (19, 22)) if dx < 0 else ((15, 22), (7, 10))
         g.fill(raised[0], 6 + dy, raised[1], 6 + dy, 'O')
         g.clear(cut[0], 7 + dy, cut[1], 7 + dy)
-        g.fill(near, 8 + dy, near, 18 + dy, 'D')
+        g.fill(low, 8 + dy, low, 18 + dy, 'D')
     left, right = CLAW_ROW['up' if up == 'left' else 'mid'], CLAW_ROW['up' if up == 'right' else 'mid']
     g.fill(3, left + dy, 6, left + 3 + dy, 'O')
     g.fill(23, right + dy, 26, right + 3 + dy, 'O')
     for x in (9, 19):
-        lift = 1 if dx and x == far else 0
+        lift = 1 if dx and x == high else 0
         g.fill(x, (9 if eye == 'open' else 10) + dy - lift, x + 1, 10 + dy - lift, 'K')
     g.cells = {(x + dx, y): c for (x, y), c in g.cells.items()}
     # Legs stay straight 2-wide columns, as in the other clips: when the body
