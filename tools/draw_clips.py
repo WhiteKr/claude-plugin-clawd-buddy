@@ -289,43 +289,43 @@ def searching():
     return frames, loop_from, outro_from
 
 
-# Crab dance (꽃게춤): Clawd bobs up and down on the spot, squatting and
-# springing up on each beat, tracing a U: up to the left, down through the
-# middle, up to the right and back, one claw pumped high beside the head while the
-# other sits a little raised, the claws trading every beat and the legs
-# stamping in pairs. The claws keep their shape and only move, as elsewhere.
+# Crab dance (꽃게춤): Clawd bobs on the spot with its feet planted, the body
+# tracing a U: up to the left, down through the middle, up to the right and
+# back, the legs leaning to follow it. One claw is pumped high on the side the
+# body rises toward while the other sits a little raised. The claws keep their
+# shape and only move, as elsewhere.
 
 CLAW_ROW = {'up': 5, 'mid': 9}
 
 
-def dance_frame(dy, left, right, stamp=None, eye='open', dx=0):
-    """dy lifts (-1) or squats (+1) the body over feet planted on the ground,
-    and dx sways the whole crab sideways."""
+def dance_frame(dy, dx=0, up=None, eye='open'):
+    """dy lifts (-1) or squats (+1) the body and dx sways it sideways, over
+    feet that stay where they stand."""
     g = Grid()
     g.fill(7, 7 + dy, 22, 18 + dy, 'O')
-    g.fill(3, CLAW_ROW[left] + dy, 6, CLAW_ROW[left] + 3 + dy, 'O')
-    g.fill(23, CLAW_ROW[right] + dy, 26, CLAW_ROW[right] + 3 + dy, 'O')
+    left, right = CLAW_ROW['up' if up == 'left' else 'mid'], CLAW_ROW['up' if up == 'right' else 'mid']
+    g.fill(3, left + dy, 6, left + 3 + dy, 'O')
+    g.fill(23, right + dy, 26, right + 3 + dy, 'O')
     for x in (9, 19):
         g.fill(x, (9 if eye == 'open' else 10) + dy, x + 1, 10 + dy, 'K')
-    for i, x in enumerate((7, 11, 17, 21)):
-        lifted = stamp is not None and i % 2 == stamp and dy <= 0
-        g.fill(x, 19 + dy, x + 1, 21 if lifted else 22, 'O')
     g.cells = {(x + dx, y): c for (x, y), c in g.cells.items()}
+    top = 19 + dy
+    for x in (7, 11, 17, 21):
+        for y in range(top, ROWS):
+            lean = round(dx * (ROWS - 1 - y) / (ROWS - 1 - top))
+            g.fill(x + lean, y, x + 1 + lean, y, 'O')
     return g
 
 
 def dance():
-    frames = [dance_frame(0, 'mid', 'mid')]
+    frames = [dance_frame(0)]
     loop_from = len(frames)
     for beat in range(8):
-        side = beat % 2
-        s = -1 if side == 0 else 1
-        l, r = ('up', 'mid') if side == 0 else ('mid', 'up')
-        frames += [dance_frame(1, 'mid', 'mid', eye='blink'), dance_frame(1, 'mid', 'mid', eye='blink'),
-                   dance_frame(0, l, r, side, dx=s), dance_frame(-1, l, r, side, dx=2 * s),
-                   dance_frame(-1, l, r, side, dx=2 * s), dance_frame(0, l, r, side, dx=s)]
+        side, s = ('left', -1) if beat % 2 == 0 else ('right', 1)
+        frames += [dance_frame(1, eye='blink'), dance_frame(1, eye='blink'), dance_frame(0, s, side),
+                   dance_frame(-1, 2 * s, side), dance_frame(-1, 2 * s, side), dance_frame(0, s, side)]
     outro_from = len(frames)
-    frames += [dance_frame(1, 'mid', 'mid', eye='blink'), dance_frame(0, 'mid', 'mid'), standing(), standing()]
+    frames += [dance_frame(1, eye='blink'), dance_frame(0), standing(), standing()]
     return frames, loop_from, outro_from
 
 
