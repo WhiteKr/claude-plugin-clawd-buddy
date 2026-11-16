@@ -289,9 +289,9 @@ def searching():
     return frames, loop_from, outro_from
 
 
-# Crab dance (꽃게춤): Clawd bobs on the spot with its feet planted, the body
-# tracing a U: up to the left, down through the middle, up to the right and
-# back, the legs leaning to follow it. One claw is pumped high on the side the
+# Crab dance (꽃게춤): Clawd bobs and weaves on the spot with its feet planted,
+# the body tracing a small U: up on the left, ducking through the middle, up
+# on the right and back. One claw is pumped high on the side the
 # body rises toward while the other sits a little raised. The claws keep their
 # shape and only move, as elsewhere.
 
@@ -309,11 +309,15 @@ def dance_frame(dy, dx=0, up=None, eye='open'):
     for x in (9, 19):
         g.fill(x, (9 if eye == 'open' else 10) + dy, x + 1, 10 + dy, 'K')
     g.cells = {(x + dx, y): c for (x, y), c in g.cells.items()}
+    # Legs stay straight 2-wide columns, as in the other clips: when the body
+    # sways, the upper half follows it and one 3-wide row joins it to feet
+    # that never move, like the knee in the stretch clip.
     top = 19 + dy
+    knee = top + (ROWS - 1 - top) // 2
     for x in (7, 11, 17, 21):
-        for y in range(top, ROWS):
-            lean = round(dx * (ROWS - 1 - y) / (ROWS - 1 - top))
-            g.fill(x + lean, y, x + 1 + lean, y, 'O')
+        g.fill(x + dx, top, x + 1 + dx, knee - 1, 'O')
+        g.fill(min(x, x + dx), knee, max(x, x + dx) + 1, knee, 'O')
+        g.fill(x, knee + 1, x + 1, ROWS - 1, 'O')
     return g
 
 
@@ -323,7 +327,7 @@ def dance():
     for beat in range(8):
         side, s = ('left', -1) if beat % 2 == 0 else ('right', 1)
         frames += [dance_frame(1, eye='blink'), dance_frame(1, eye='blink'), dance_frame(0, s, side),
-                   dance_frame(-1, 2 * s, side), dance_frame(-1, 2 * s, side), dance_frame(0, s, side)]
+                   dance_frame(-1, s, side), dance_frame(-1, s, side), dance_frame(0, s, side)]
     outro_from = len(frames)
     frames += [dance_frame(1, eye='blink'), dance_frame(0), standing(), standing()]
     return frames, loop_from, outro_from
