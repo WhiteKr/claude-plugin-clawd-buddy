@@ -1,0 +1,11 @@
+{
+  "name": "clawd-buddy",
+  "version": "0.1.0",
+  "description": "A pixel crab above the prompt that acts out what Claude is doing",
+  "author": {
+    "name": "WhiteKr",
+    "email": "white_kr@icloud.com"
+  },
+  "repository": "https://github.com/WhiteKr/claude-plugin-clawd-buddy.git",
+  "types": "./types/index.d.ts"
+}
