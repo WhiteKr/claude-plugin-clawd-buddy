@@ -312,7 +312,10 @@ def dance_frame(dy, dx=0, up=None, eye='open'):
         g.fill(raised[0], 6 + dy, raised[1], 6 + dy, 'O')
         g.clear(cut[0], 7 + dy, cut[1], 7 + dy)
         g.fill(low, 8 + dy, low, 18 + dy, 'D')
-    left, right = CLAW_ROW['up' if up == 'left' else 'mid'], CLAW_ROW['up' if up == 'right' else 'mid']
+    # The raised claw reaches a row higher again when its side of the body tilts up.
+    reach = 1 if dx else 0
+    left = CLAW_ROW['up'] - reach if up == 'left' else CLAW_ROW['mid']
+    right = CLAW_ROW['up'] - reach if up == 'right' else CLAW_ROW['mid']
     g.fill(3, left + dy, 6, left + 3 + dy, 'O')
     g.fill(23, right + dy, 26, right + 3 + dy, 'O')
     for x in (9, 19):
