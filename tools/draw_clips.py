@@ -290,8 +290,8 @@ def searching():
 
 
 # Crab dance (꽃게춤): Clawd bobs up and down on the spot, squatting and
-# springing up on each beat and swaying a step left on one rise and right on
-# the next, back to the middle each time it lands, one claw pumped high beside the head while the
+# springing up on each beat, tracing a U: up to the left, down through the
+# middle, up to the right and back, one claw pumped high beside the head while the
 # other sits a little raised, the claws trading every beat and the legs
 # stamping in pairs. The claws keep their shape and only move, as elsewhere.
 
@@ -315,16 +315,17 @@ def dance_frame(dy, left, right, stamp=None, eye='open', dx=0):
 
 
 def dance():
-    frames = [dance_frame(0, 'mid', 'mid'), dance_frame(1, 'mid', 'mid', eye='blink')]
+    frames = [dance_frame(0, 'mid', 'mid')]
     loop_from = len(frames)
     for beat in range(8):
         side = beat % 2
+        s = -1 if side == 0 else 1
         l, r = ('up', 'mid') if side == 0 else ('mid', 'up')
-        dx = -1 if side == 0 else 1
-        frames += [dance_frame(1, l, r, eye='blink'), dance_frame(0, l, r, side), dance_frame(-1, l, r, side, dx=dx),
-                   dance_frame(-1, l, r, side, dx=dx), dance_frame(0, l, r, side), dance_frame(1, 'mid', 'mid', eye='blink')]
+        frames += [dance_frame(1, 'mid', 'mid', eye='blink'), dance_frame(1, 'mid', 'mid', eye='blink'),
+                   dance_frame(0, l, r, side, dx=s), dance_frame(-1, l, r, side, dx=2 * s),
+                   dance_frame(-1, l, r, side, dx=2 * s), dance_frame(0, l, r, side, dx=s)]
     outro_from = len(frames)
-    frames += [dance_frame(0, 'mid', 'mid'), standing(), standing()]
+    frames += [dance_frame(1, 'mid', 'mid', eye='blink'), dance_frame(0, 'mid', 'mid'), standing(), standing()]
     return frames, loop_from, outro_from
 
 
