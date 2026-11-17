@@ -1,7 +1,7 @@
 import type { Register } from 'claude-code'
 
 import type { Activity, Picture } from '../types'
-import { CLIP_BOX, CLIPS, FPS } from './clawd-clips'
+import { CLAWD_AXIS, CLIP_BOX, CLIPS, FPS } from './clawd-clips'
 import type { ClawdClip } from './clawd-clips'
 
 const PICTURE = { plugin: 'clawd-buddy', key: 'picture' } as const
@@ -15,7 +15,11 @@ const APP_SCALE = 80 / 2750
 const TOOL_ACTIVITY: Record<string, Activity> = {
   Read: 'reading',
   NotebookRead: 'reading',
+  Skill: 'reading',
   WebSearch: 'searching',
+  Grep: 'searching',
+  Glob: 'searching',
+  LS: 'searching',
   WebFetch: 'searching',
   ToolSearch: 'searching',
   Edit: 'editing',
@@ -25,6 +29,11 @@ const TOOL_ACTIVITY: Record<string, Activity> = {
   Bash: 'running',
   Monitor: 'running',
   AskUserQuestion: 'waiting',
+  ExitPlanMode: 'waiting',
+  // Planning and handing work to a subagent are still thinking.
+  TodoWrite: 'thinking',
+  Agent: 'thinking',
+  Task: 'thinking',
 }
 
 const BASH_READERS = new Set(['cat', 'head', 'tail', 'less', 'more', 'bat', 'nl', 'wc', 'jq', 'file', 'stat', 'diff'])
@@ -56,16 +65,61 @@ const PERFORMANCE: Record<Activity, Performance> = {
   reading: { loop: 'read', alt: 'Clawd reads a book, turning the pages' },
   searching: { loop: 'search', alt: 'Clawd searches with a magnifying glass' },
   editing: { loop: 'laptop', alt: 'Clawd types on a laptop' },
-  running: { loop: 'laptop', alt: 'Clawd runs a command on a laptop' },
-  waiting: { loop: 'stretch', alt: 'Clawd stretches while waiting for you' },
-  done: { intro: 'dance', loop: 'snooze', alt: 'Clawd does a little crab dance, done, then dozes off' },
+  running: { loop: 'crabwalk', alt: 'Clawd scuttles briskly back and forth while a command runs' },
+  waiting: { loop: 'sway', alt: 'Clawd sways from side to side while waiting for you' },
+  done: { intro: 'dance', loop: 'look', alt: 'Clawd weaves through a crab dance, raising the claw on the side it rises to, then looks around' },
+  interrupted: { loop: 'look', alt: 'Clawd stops and looks around' },
 }
 
-// Alone in the band, Clawd strolls across it while thinking: each tick moves
-// it this share of the room beside it, about 48px a second on a 700px band.
-const STROLL_STEP = 0.007
-// Walk frames from here on are the outro's standing pose: Clawd stops there.
-const STRIDES = 16
+// After a turn, Clawd stays up this many frames before it dozes off: through
+// the dance and one look around, or one look around when the turn was cut short.
+const REST_AFTER: Partial<Record<Activity, number>> = {
+  done: CLIPS.dance.frames.length + CLIPS.look.frames.length,
+  interrupted: CLIPS.look.frames.length,
+}
+
+// A scene is kept on screen at least this long, and past its intro, so a
+// tool that answers at once still gets a recognisable moment, not a flicker.
+const HOLD_MS = 1200
+// When the last tool answers, Clawd keeps at what it was doing this long
+// before it goes back to thinking, so a run of reads stays one reading.
+const SETTLE_TICKS = 15
+
+// Alone in the band, Clawd patrols it while thinking, as on claude.dev: it
+// walks a while, stops to look around, and turns at either end. Each tick
+// walking moves it this share of the room beside it: about 14px a second on
+// a 700px band, two-fifths of its own width, as the official patrol does.
+const STROLL_STEP = 0.002
+// While a command runs, Clawd scuttles the band in the desktop app's crab
+// walk instead: two and a half times as fast, with no stops to look around,
+// and a quick about-face on the spot at either end.
+const SCUTTLE_STEP = 0.005
+// The crab walk's stepping frames, and the standing frame after them.
+const SCUTTLE_LOOP = 16
+const SCUTTLE_STAND = 16
+const FLIP_FRAMES = 2
+// The official walk: frames before WALK_LOOP get going, the loop repeats up
+// to WALK_STOP, and the frames after it settle back into the standing pose.
+const WALK_LOOP = 8
+const WALK_STOP = 23
+// The Turning act from facing right, through a front squat, to facing left.
+const TURN_FROM = 15
+const TURN_TO = 22
+// How long a stretch of walking lasts, in ticks: 2.2 to 4.6 seconds.
+const walkTicks = () => Math.round((2200 + 2400 * Math.random()) / TICK_MS)
+// Clawd roams the band freely: a stretch of walking ends in a turn instead
+// of a stop this often, and a scuttle doubles back after 0.8 to 2.6 seconds,
+// not only when it reaches an end.
+const MIDWAY_TURN = 0.35
+const scuttleTicks = () => Math.round((800 + 1800 * Math.random()) / TICK_MS)
+
+// The frames of the stretch where Clawd stands straight between moves.
+const STRETCH_BREAKS = new Set(
+  CLIPS.stretch.frames.flatMap((f, i) => (i > 0 && f.join() === CLIPS.stretch.frames[0]?.join() ? [i] : [])),
+)
+
+// Beside other rows, Clawd keeps this share of the band to walk in.
+const LANE = '30%'
 
 const WIDTH = CLIP_BOX.width * APP_SCALE
 const HEIGHT = CLIP_BOX.height * APP_SCALE
@@ -75,7 +129,8 @@ type Frame = { name: ClawdClip; index: number }
 // A clip's intro plays once, then its loop repeats; its outro is only played
 // on the way out, so every clip is left in the standing pose it started from.
 const playing = ({ intro, loop }: Performance, frame: number): Frame => {
-  const introLength = intro === undefined ? 0 : CLIPS[intro].outroFrom
+  // Played once, an intro runs through its outro back to the standing pose.
+  const introLength = intro === undefined ? 0 : CLIPS[intro].frames.length
 
   if (intro !== undefined && frame < introLength) {
     return { name: intro, index: frame }
@@ -87,14 +142,21 @@ const playing = ({ intro, loop }: Performance, frame: number): Frame => {
   return { name: loop, index: f < outroFrom ? f : loopFrom + ((f - loopFrom) % (outroFrom - loopFrom)) }
 }
 
-// Leaving mid-intro plays the intro back; leaving mid-loop plays the outro.
+// Leaving mid-intro plays the intro back; leaving mid-loop plays the outro,
+// or, for a clip whose loop is the whole clip, the rest of the loop. A clip
+// played once as an intro is past its loop in its outro, and finishes it.
 const leaving = (performance: Performance, frame: number): Frame[] => {
   const { name, index } = playing(performance, frame)
   const { loopFrom, outroFrom, frames } = CLIPS[name]
+  const rest = (from: number, to: number) => Array.from({ length: Math.max(to - from, 0) }, (_, i) => from + i)
   const indexes =
     index < loopFrom
       ? Array.from({ length: index }, (_, i) => index - 1 - i)
-      : Array.from({ length: frames.length - outroFrom }, (_, i) => outroFrom + i)
+      : index >= outroFrom
+        ? rest(index + 1, frames.length)
+        : outroFrom < frames.length
+          ? rest(outroFrom, frames.length)
+          : rest(index + 1, outroFrom)
 
   return indexes.map(i => ({ name, index: i }))
 }
@@ -102,11 +164,11 @@ const leaving = (performance: Performance, frame: number): Frame[] => {
 // When the next performance plays the clip already on screen, it picks up
 // from the same frame instead of leaving and starting that clip over.
 const carryOn = ({ intro, loop }: Performance, { name, index }: Frame): number | undefined => {
-  if (name === intro && index < CLIPS[intro].outroFrom) {
+  if (name === intro) {
     return index
   }
   if (name === loop) {
-    return (intro === undefined ? 0 : CLIPS[intro].outroFrom) + index
+    return (intro === undefined ? 0 : CLIPS[intro].frames.length) + index
   }
 
   return undefined
@@ -114,12 +176,13 @@ const carryOn = ({ intro, loop }: Performance, { name, index }: Frame): number |
 
 // The desktop strips CSS animation from plugin SVG while it composites in
 // software, so each frame is drawn still and the tick steps them.
-// A stroll to the left mirrors the walk, so Clawd faces the way it goes.
+// Walking left mirrors the walk about Clawd's own centre line, so it faces
+// the way it goes without shifting on the spot.
 const picture = ({ name, index }: Frame, alt: string, at = 0, mirrored = false): Picture => {
   const { groups, frames } = CLIPS[name]
   const drawn = (frames[index] ?? []).map(g => groups[g]).join('')
   const markup = mirrored
-    ? `<g transform="translate(${2 * CLIP_BOX.x + CLIP_BOX.width} 0) scale(-1 1)">${drawn}</g>`
+    ? `<g transform="translate(${2 * CLAWD_AXIS} 0) scale(-1 1)">${drawn}</g>`
     : drawn
 
   return {
@@ -129,17 +192,84 @@ const picture = ({ name, index }: Frame, alt: string, at = 0, mirrored = false):
   }
 }
 
-const strolling = ({ name, index }: Frame) => name === 'walk' && index < STRIDES
+type Patrol = { step: 'start' | 'walk' | 'turn' | 'stop' | 'look' | 'scuttle' | 'flip'; since: number; until: number }
 
-// Steps along the band, turning at either end. `at` is the share of the room
-// left of Clawd, from 0 at the left end to 1 at the right.
-const stroll = (at: number, heading: 1 | -1): { at: number; heading: 1 | -1 } => {
-  const next = at + heading * STROLL_STEP
+// The activities Clawd acts out on the move, and the first step of each.
+const GAIT: Partial<Record<Activity, Patrol['step']>> = { thinking: 'start', running: 'scuttle' }
 
-  if (next >= 1) return { at: 1, heading: -1 }
-  if (next <= 0) return { at: 0, heading: 1 }
-  return { at: next, heading }
+// Where Clawd is in its patrol, and the frame that shows. Every step but the
+// look keeps Clawd side-on, so it can stop or turn from any of them.
+const patrolFrame = ({ step, since }: Patrol): Frame => {
+  const f = framesSince(since)
+
+  switch (step) {
+    case 'start':
+      return { name: 'walk', index: Math.min(f, WALK_LOOP - 1) }
+    case 'walk':
+      return { name: 'walk', index: WALK_LOOP + (f % (WALK_STOP - WALK_LOOP)) }
+    case 'turn':
+      return { name: 'turn', index: Math.min(TURN_FROM + f, TURN_TO - 1) }
+    case 'stop':
+      return { name: 'walk', index: Math.min(WALK_STOP + f, CLIPS.walk.frames.length - 1) }
+    case 'look':
+      return { name: 'look', index: Math.min(f, CLIPS.look.frames.length - 1) }
+    case 'scuttle':
+      return { name: 'crabwalk', index: f % SCUTTLE_LOOP }
+    case 'flip':
+      return { name: 'crabwalk', index: SCUTTLE_STAND }
+  }
 }
+
+const stepDone = ({ step, since, until }: Patrol): boolean => {
+  const f = framesSince(since)
+
+  switch (step) {
+    case 'start':
+      return f >= WALK_LOOP
+    case 'walk':
+      return tick >= until
+    case 'turn':
+      return f >= TURN_TO - TURN_FROM
+    case 'stop':
+      return f >= CLIPS.walk.frames.length - WALK_STOP
+    case 'look':
+      return f >= CLIPS.look.frames.length
+    case 'scuttle':
+      return tick >= until
+    case 'flip':
+      return f >= FLIP_FRAMES
+  }
+}
+
+const nextStep = (p: Patrol): Patrol => {
+  switch (p.step) {
+    case 'start':
+    case 'turn':
+      return { step: 'walk', since: tick, until: p.step === 'turn' ? p.until : tick + walkTicks() }
+    // A stretch of walking ends in a stop to look around, or now and then in
+    // a turn to walk the other way, wherever Clawd happens to be.
+    case 'walk':
+      return Math.random() < MIDWAY_TURN
+        ? { step: 'turn', since: tick, until: tick + walkTicks() }
+        : { step: 'stop', since: tick, until: tick }
+    case 'stop':
+      return { step: 'look', since: tick, until: tick }
+    // Facing front after looking around, Clawd sets off whichever way it
+    // likes, more likely towards the side with more room.
+    case 'look':
+      place = { at: place.at, heading: wayToGo() }
+      return { step: 'start', since: tick, until: tick }
+    case 'scuttle':
+      return { step: 'flip', since: tick, until: tick + scuttleTicks() }
+    case 'flip':
+      return { step: 'scuttle', since: tick, until: p.until }
+  }
+}
+
+// Which way to set off: the side with more room is the likelier, but either
+// can come up anywhere in the band.
+const wayToGo = (): 1 | -1 =>
+  place.at > 0.97 ? -1 : place.at < 0.03 ? 1 : Math.random() < Math.min(Math.max(1 - place.at, 0.15), 0.85) ? 1 : -1
 
 const running: Activity[] = []
 let activity: Activity = 'idle'
@@ -147,42 +277,128 @@ let tick = 0
 let scene: { activity: Activity; since: number } = { activity, since: 0 }
 let exit: { frames: Frame[]; since: number } | undefined
 let place: { at: number; heading: 1 | -1 } = { at: 0, heading: 1 }
+let patrol: Patrol = { step: 'start', since: 0, until: 0 }
+let patrolling: typeof scene | undefined
+let calm: number | undefined
 let shown = picture(playing(PERFORMANCE[activity], 0), PERFORMANCE[activity].alt)
 
 const act = (next: Activity) => {
   activity = next
+  calm = undefined
 }
+
+// How long the scene on screen has to stay before it may be left.
+const holdTicks = ({ intro, loop }: Performance) =>
+  Math.max(HOLD_MS, ((intro === undefined ? CLIPS[loop].loopFrom : CLIPS[intro].loopFrom) * 1000) / FPS) / TICK_MS
 
 const framesSince = (since: number) => Math.floor(((tick - since) * TICK_MS * FPS) / 1000)
 
+// One tick of the patrol: walk on, turn at an end, or move to the next step.
+const patrolTick = (): { frame: Frame; mirrored: boolean } => {
+  const moving = patrol.step === 'walk' || patrol.step === 'scuttle'
+
+  if (moving && !stepDone(patrol)) {
+    const next = place.at + place.heading * (patrol.step === 'walk' ? STROLL_STEP : SCUTTLE_STEP)
+
+    if (next >= 1 || next <= 0) {
+      place = { at: Math.min(Math.max(next, 0), 1), heading: place.heading }
+      patrol = { step: patrol.step === 'walk' ? 'turn' : 'flip', since: tick, until: patrol.until }
+    } else {
+      place = { at: next, heading: place.heading }
+    }
+  } else if (stepDone(patrol)) {
+    if (patrol.step === 'turn' || patrol.step === 'flip') {
+      place = { at: place.at, heading: place.heading === 1 ? -1 : 1 }
+    }
+    patrol = nextStep(patrol)
+  }
+
+  // The turn is drawn from facing right to facing left, so it is mirrored
+  // when Clawd turns back from the left end.
+  return { frame: patrolFrame(patrol), mirrored: place.heading < 0 && patrol.step !== 'look' }
+}
+
+// Leaving the patrol from side-on settles into the standing pose first.
+const leavingPatrol = (): Frame[] =>
+  patrol.step === 'look'
+    ? []
+    : patrol.step === 'scuttle' || patrol.step === 'flip'
+      ? [{ name: 'crabwalk' as const, index: SCUTTLE_STAND }]
+      : Array.from({ length: CLIPS.walk.frames.length - WALK_STOP }, (_, i) => ({ name: 'walk' as const, index: WALK_STOP + i }))
+
 const advance = (): Picture => {
+  if (calm !== undefined && tick >= calm) {
+    act('thinking')
+  }
+  const rest = REST_AFTER[activity]
+  if (rest !== undefined && scene.activity === activity && exit === undefined && framesSince(scene.since) >= rest) {
+    act('idle')
+  }
+  // A doze can be left at once; anything else is held for its moment.
+  const held =
+    scene.activity !== 'idle' && activity !== 'idle' && tick - scene.since < holdTicks(PERFORMANCE[scene.activity])
+
+  // Called to real work mid-stretch, Clawd breaks off the next time it
+  // stands straight; it only finishes the stretch at leisure, to think.
+  const stretching = exit?.frames[framesSince(exit.since)]
+  if (
+    exit !== undefined &&
+    stretching?.name === 'stretch' &&
+    STRETCH_BREAKS.has(stretching.index) &&
+    activity !== 'idle' &&
+    activity !== 'thinking'
+  ) {
+    exit = undefined
+    scene = { activity, since: tick }
+  }
   if (exit !== undefined && framesSince(exit.since) >= exit.frames.length) {
     exit = undefined
     scene = { activity, since: tick }
   }
-  if (exit === undefined && scene.activity !== activity) {
+  if (!held && exit === undefined && scene.activity !== activity && GAIT[scene.activity] !== undefined) {
+    const frames = leavingPatrol()
+    exit = frames.length > 0 ? { frames, since: tick } : undefined
+    scene = exit === undefined ? { activity, since: tick } : scene
+  }
+  if (!held && exit === undefined && scene.activity !== activity) {
     const carried = carryOn(PERFORMANCE[activity], playing(PERFORMANCE[scene.activity], framesSince(scene.since)))
 
     if (carried !== undefined) {
       scene = { activity, since: tick - ((carried + 0.5) * 1000) / (TICK_MS * FPS) }
     }
   }
-  if (exit === undefined && scene.activity !== activity) {
-    const frames = leaving(PERFORMANCE[scene.activity], framesSince(scene.since))
+  if (!held && exit === undefined && scene.activity !== activity) {
+    const from = playing(PERFORMANCE[scene.activity], framesSince(scene.since))
+    // Woken from a doze, Clawd stretches before it does anything else, as
+    // the Clawd on the desktop app's new-session page does.
+    const waking =
+      from.name === 'snooze' ? CLIPS.stretch.frames.map((_, i) => ({ name: 'stretch' as const, index: i })) : []
+    const frames = [...leaving(PERFORMANCE[scene.activity], framesSince(scene.since)), ...waking]
     exit = frames.length > 0 ? { frames, since: tick } : undefined
     scene = exit === undefined ? { activity, since: tick } : scene
   }
 
-  const { alt } = PERFORMANCE[scene.activity]
-  const frame = exit?.frames[framesSince(exit.since)] ?? playing(PERFORMANCE[scene.activity], framesSince(scene.since))
-
-  const walking = strolling(frame)
-
-  if (walking) {
-    place = stroll(place.at, place.heading)
+  // A fresh scene on the move starts its patrol: a stroll by getting going,
+  // a scuttle straight away.
+  const gait = GAIT[scene.activity]
+  if (gait !== undefined && patrolling !== scene) {
+    patrolling = scene
+    place = { at: place.at, heading: gait === 'scuttle' ? wayToGo() : place.heading }
+    patrol = { step: gait, since: tick, until: gait === 'scuttle' ? tick + scuttleTicks() : tick }
   }
 
-  return picture(frame, alt, place.at, walking && place.heading < 0)
+  const { alt } = PERFORMANCE[scene.activity]
+  const exiting = exit?.frames[framesSince(exit.since)]
+
+  if (exiting !== undefined) {
+    return picture(exiting, alt, place.at, (exiting.name === 'walk' || exiting.name === 'crabwalk') && place.heading < 0)
+  }
+  if (gait !== undefined) {
+    const { frame, mirrored } = patrolTick()
+    return picture(frame, alt, place.at, mirrored)
+  }
+
+  return picture(playing(PERFORMANCE[scene.activity], framesSince(scene.since)), alt, place.at)
 }
 
 export const register: Register = on => {
@@ -213,7 +429,9 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined) {
       running.length = 0
-      act('done')
+      // Only an answered turn earns the dance; one cut short or failed ends
+      // with Clawd stopping to look around.
+      act(e.reason === 'answer' ? 'done' : 'interrupted')
     }
 
     return next(e)
@@ -226,11 +444,42 @@ export const register: Register = on => {
     const ran = await next(e)
     running.splice(running.indexOf(doing), 1)
 
-    if (activity !== 'idle' && activity !== 'done') {
-      act(running.at(-1) ?? 'thinking')
+    if (activity !== 'idle' && activity !== 'done' && activity !== 'interrupted') {
+      const still = running.at(-1)
+
+      if (still !== undefined) {
+        act(still)
+      } else if (activity === 'waiting' && doing !== 'waiting') {
+        // Refused at the prompt: nothing ran, so back to thinking at once.
+        act('thinking')
+      } else {
+        calm = tick + SETTLE_TICKS
+      }
     }
 
     return ran
+  }).catch(($, e, next) => next(e))
+
+  // A call that has to ask for permission leaves Clawd waiting on you until
+  // you answer; once allowed, it gets on with the call.
+  on('tool.check', async ($, e, next) => {
+    const verdict = await next(e)
+
+    if (verdict.decision === 'ask' && e.tool_use_id !== undefined && running.length > 0) {
+      act('waiting')
+    }
+
+    return verdict
+  }).catch(($, e, next) => next(e))
+
+  on('tool.run', async ($, e, next) => {
+    const doing = running.at(-1)
+
+    if (activity === 'waiting' && doing !== undefined && doing !== 'waiting') {
+      act(doing)
+    }
+
+    return next(e)
   }).catch(($, e, next) => next(e))
 
   // This row reads no state: a redraw here would change the rows the list hook below
@@ -259,23 +508,26 @@ export const register: Register = on => {
     const otherRows = e.props.rows.filter(row => row.plugin !== $.plugin.name)
     const clawd = <Svg source={now.source} alt={now.alt} width={WIDTH} height={HEIGHT} />
 
-    // With no other rows the band is Clawd's alone: the two spacers split the
-    // room around it, so `at` places it anywhere from the left end to the right.
-    if (otherRows.length === 0) {
-      const at = now.at ?? 0
+    // The two spacers split the room around Clawd, so `at` places it
+    // anywhere from the left end to the right: across the whole band when it
+    // has the band alone, and along a lane on the left beside other rows, so
+    // it never walks on the spot.
+    const at = now.at ?? 0
+    const lane = (
+      <Box flexDirection="row" alignItems="center" flexGrow={otherRows.length === 0 ? 1 : 0} flexShrink={0} width={otherRows.length === 0 ? undefined : LANE}>
+        <Box flexGrow={at} />
+        {clawd}
+        <Box flexGrow={1 - at} />
+      </Box>
+    )
 
-      return (
-        <Box flexDirection="row" alignItems="center">
-          <Box flexGrow={at} />
-          {clawd}
-          <Box flexGrow={1 - at} />
-        </Box>
-      )
+    if (otherRows.length === 0) {
+      return <Box flexDirection="row" alignItems="center">{lane}</Box>
     }
 
     return (
       <Box flexDirection="row" alignItems="center" gap={1}>
-        {clawd}
+        {lane}
         <Box flexDirection="column" flexGrow={1}>
           {await next({ ...e, props: { ...e.props, rows: otherRows } })}
         </Box>
