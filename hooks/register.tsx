@@ -6,6 +6,7 @@ import type { ClawdClip } from './clawd-clips'
 
 const PICTURE = { plugin: 'clawd-buddy', key: 'picture' } as const
 const GRAB = 'grab'
+const TRACK = 'track'
 // The engine redraws a site at most ten times a second.
 const TICK_MS = 100
 
@@ -150,6 +151,8 @@ let exit: { frames: Frame[]; since: number } | undefined
 let place: { at: number; heading: 1 | -1 } = { at: 0, heading: 1 }
 // Set while the person holds Clawd up with the pointer, from the tick it was picked up.
 let heldSince: number | undefined
+// Where in Clawd it was grabbed, and how wide Clawd is, in cells.
+let grip = { offset: 0, clawd: 0 }
 // Set once the region that catches the pointer failed: the band is drawn without it.
 let grabFailed = false
 let shown = picture(playing(PERFORMANCE[activity], 0), PERFORMANCE[activity].alt)
@@ -219,11 +222,15 @@ const show = ($: EngineInterface, now: Picture) => {
   }
 }
 
-const isGrab = (data: unknown): data is { held: boolean; at: number } =>
-  typeof data === 'object' &&
-  data !== null &&
-  typeof (data as { held?: unknown }).held === 'boolean' &&
-  Number.isFinite((data as { at?: unknown }).at)
+type Grabbed = { held: boolean; at?: number | null; offset?: number; clawd?: number }
+
+const isGrab = (data: unknown): data is Grabbed => {
+  if (typeof data !== 'object' || data === null) return false
+  const { held, at, offset, clawd } = data as Record<string, unknown>
+  const number = (v: unknown) => v === undefined || Number.isFinite(v)
+
+  return typeof held === 'boolean' && (at === null || number(at)) && number(offset) && number(clawd)
+}
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
@@ -268,10 +275,15 @@ export const register: Register = on => {
     return ran
   }).catch(($, e, next) => next(e))
 
-  // The region laid over Clawd posts each press, move and release of the pointer.
+  // The regions over Clawd and the band post the press, the moves and the release.
   on('ui.message', async ($, e, next) => {
-    if (e.element === GRAB && isGrab(e.data)) {
-      hold(e.data.held, Math.min(1, Math.max(0, e.data.at)))
+    if ((e.element === GRAB || e.element === TRACK) && isGrab(e.data)) {
+      const { held, at, offset, clawd } = e.data
+
+      if (offset !== undefined && clawd !== undefined) {
+        grip = { offset, clawd }
+      }
+      hold(held, typeof at === 'number' ? Math.min(1, Math.max(0, at)) : place.at)
       show($, heldSince === undefined ? advance() : holding(heldSince))
     }
 
@@ -279,7 +291,7 @@ export const register: Register = on => {
   })
 
   on('ui.fault', async ($, e, next) => {
-    if (e.element === GRAB) {
+    if (e.element === GRAB || e.element === TRACK) {
       grabFailed = true
       heldSince = undefined
     }
@@ -313,34 +325,46 @@ export const register: Register = on => {
     const otherRows = e.props.rows.filter(row => row.plugin !== $.plugin.name)
     const at = now.at ?? 0
     const drawn = <Svg source={now.source} alt={now.alt} width={WIDTH} height={HEIGHT} />
-    // A region over Clawd catches the pointer, so the person can pick it up and
-    // carry it along the band; with other rows beside it there is no room to
-    // carry it, and it only struggles where it stands.
+    // A region over Clawd hears the press that picks it up. While it is held,
+    // a region over the whole band hears where the pointer goes and lets go,
+    // so the person can carry it along the band; with other rows beside it
+    // there is no room to carry it, and it only struggles where it stands.
+    const alone = otherRows.length === 0
+    const track =
+      grabFailed || heldSince === undefined ? null : (
+        <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+          <Client
+            key={TRACK}
+            module="./grab.ts"
+            props={{ mode: 'track', ...grip, movable: alone }}
+            width="100%"
+            height="100%"
+          />
+        </Box>
+      )
+    // Other rows can't sit under a positioned Box, so beside them the band-wide
+    // region shrinks to Clawd's own.
     const clawd = grabFailed ? (
       drawn
     ) : (
       <Box position="relative">
         {drawn}
         <Box position="absolute" top={0} left={0} right={0} bottom={0}>
-          <Client
-            key={GRAB}
-            module="./grab.ts"
-            props={{ at, room: otherRows.length === 0 ? e.props.bodyColumns : 0 }}
-            width="100%"
-            height="100%"
-          />
+          <Client key={GRAB} module="./grab.ts" props={{ mode: 'grab' }} width="100%" height="100%" />
         </Box>
+        {alone ? null : track}
       </Box>
     )
 
     // With no other rows the band is Clawd's alone: the two spacers split the
     // room around it, so `at` places it anywhere from the left end to the right.
-    if (otherRows.length === 0) {
+    if (alone) {
       return (
-        <Box flexDirection="row" alignItems="center">
+        <Box flexDirection="row" alignItems="center" position="relative">
           <Box flexGrow={at} />
           {clawd}
           <Box flexGrow={1 - at} />
+          {track}
         </Box>
       )
     }

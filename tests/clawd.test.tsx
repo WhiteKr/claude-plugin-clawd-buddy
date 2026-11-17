@@ -73,25 +73,44 @@ test('the person can pick Clawd up and carry it along the band', async ($, on) =
   // The spacer left of Clawd grows by the share of the room it stands at.
   const at = async () => (await ui.findAll({ type: 'Box' })).find(b => typeof b.props.flexGrow === 'number')?.props.flexGrow
 
+  expect(await ui.find({ type: 'Client', key: 'track' })).toBeUndefined()
   await ui.pointer({ type: 'down', x: 4, y: 1, button: 'left', in: 'grab' })
   expect((await svg())?.alt).toBe('Clawd is held up, kicking and struggling')
 
+  // Held, a region over the whole band follows the pointer, wherever it goes.
+  await ui.resize({ columns: 80, rows: 3, in: 'track' })
   // The band is 80 cells and Clawd 8, so 36 cells to the right is half the room.
-  await ui.pointer({ type: 'move', x: 40, y: 1, button: 'left', in: 'grab' })
+  await ui.pointer({ type: 'move', x: 40, y: 1, button: 'left', in: 'track' })
   await clock.advance(500)
   expect((await svg())?.alt).toBe('Clawd is held up, kicking and struggling')
   expect(await at()).toBe(0.5)
 
-  // Clawd moved under the pointer, so the pointer is where it grabbed it again.
-  await ui.pointer({ type: 'up', x: 4, y: 1, button: 'left', in: 'grab' })
+  await ui.pointer({ type: 'up', x: 40, y: 1, button: 'left', in: 'track' })
   expect((await svg())?.alt).toBe('Clawd dozes')
   expect(await at()).toBe(0.5)
+  expect(await ui.find({ type: 'Client', key: 'track' })).toBeUndefined()
 
   // It never leaves the band, however far the pointer goes.
   await ui.pointer({ type: 'down', x: 4, y: 1, button: 'left', in: 'grab' })
-  await ui.pointer({ type: 'move', x: 500, y: 1, button: 'left', in: 'grab' })
-  await ui.pointer({ type: 'up', x: 500, y: 1, button: 'left', in: 'grab' })
+  await ui.resize({ columns: 80, rows: 3, in: 'track' })
+  await ui.pointer({ type: 'move', x: 500, y: 1, button: 'left', in: 'track' })
+  await ui.pointer({ type: 'up', x: 500, y: 1, button: 'left', in: 'track' })
   expect(await at()).toBe(1)
+  await ui.unmount()
+})
+
+test('the pointer leaving the band sets Clawd down', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+
+  const ui = await $.ui.mount(list())
+  await ui.resize({ columns: 8, rows: 3, in: 'grab' })
+  await ui.pointer({ type: 'down', x: 4, y: 1, button: 'left', in: 'grab' })
+  await ui.resize({ columns: 80, rows: 3, in: 'track' })
+  await ui.pointer({ type: 'move', x: 22, y: 1, button: 'left', in: 'track' })
+  await ui.pointer({ type: 'leave', x: 22, y: 1, in: 'track' })
+  expect((await ui.find({ type: 'Svg' }))?.props.alt).toBe('Clawd dozes')
+  expect((await ui.findAll({ type: 'Box' })).find(b => typeof b.props.flexGrow === 'number')?.props.flexGrow).toBe(0.25)
   await ui.unmount()
 })
 
@@ -103,9 +122,10 @@ test('beside other rows Clawd only struggles where it stands', async ($, on) => 
   await ui.resize({ columns: 8, rows: 3, in: 'grab' })
 
   await ui.pointer({ type: 'down', x: 4, y: 1, button: 'left', in: 'grab' })
-  await ui.pointer({ type: 'move', x: 40, y: 1, button: 'left', in: 'grab' })
+  await ui.resize({ columns: 80, rows: 3, in: 'track' })
+  await ui.pointer({ type: 'move', x: 40, y: 1, button: 'left', in: 'track' })
   expect((await ui.find({ type: 'Svg' }))?.props.alt).toBe('Clawd is held up, kicking and struggling')
-  await ui.pointer({ type: 'up', x: 40, y: 1, button: 'left', in: 'grab' })
+  await ui.pointer({ type: 'up', x: 40, y: 1, button: 'left', in: 'track' })
   expect((await ui.find({ type: 'Svg' }))?.props.alt).toBe('Clawd dozes')
   await ui.unmount()
 })
