@@ -76,7 +76,7 @@ test('alone in the band, Clawd patrols it: walks, stops to look around, and turn
     const ui = await $.ui.mount(alone)
     const spacers = await ui.findAll({ type: 'Box' })
     const svg = await ui.find({ type: 'Svg' })
-    places.push(Number(spacers[1]?.props.flexGrow ?? 0))
+    places.push(Number(spacers[2]?.props.flexGrow ?? 0))
     pictures.add(String(svg?.props.source))
     await ui.unmount()
   }
@@ -125,4 +125,42 @@ test('a turn cut short skips the dance: Clawd stops, looks around, then dozes', 
   expect(await shownAlt($)).toBe('Clawd stops and looks around')
   await clock.advance(6000)
   expect(await shownAlt($)).toBe('Clawd dozes')
+})
+
+test('while a command runs, Clawd scuttles the band in the crab walk, faster than its thinking stroll', async ($, on) => {
+  const clock = engine(on)
+  let finish = () => {}
+  on('tool.call', () => new Promise(resolve => (finish = () => resolve({ result: { stdout: '' } } as never))))
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  const call = $.tool.call({ tool: 'Bash', command: 'npm test' } as never)
+  await clock.advance(10000)
+
+  const places: number[] = []
+  for (let second = 0; second < 60; second++) {
+    await clock.advance(500)
+    const ui = await $.ui.mount(alone)
+    places.push(Number((await ui.findAll({ type: 'Box' }))[2]?.props.flexGrow ?? 0))
+    expect((await ui.find({ type: 'Svg' }))?.props.alt).toContain('scuttles')
+    await ui.unmount()
+  }
+  // It never stands still, and it crosses the band within the half minute.
+  expect(places.every((at, i) => i === 0 || at !== places[i - 1])).toBe(true)
+  expect(Math.max(...places) - Math.min(...places)).toBeGreaterThan(0.9)
+
+  finish()
+  await call
+})
+
+test('beside other rows, Clawd still walks: along its own lane on the left', async ($, on) => {
+  const clock = engine(on)
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await clock.advance(20000)
+
+  const ui = await $.ui.mount({ ...alone, props: { ...alone.props, rows: [{ plugin: 'other', key: 'r', text: 'other row' }] } } as never)
+  const boxes = await ui.findAll({ type: 'Box' })
+  expect(boxes[1]?.props.width).toBe('30%')
+  expect(boxes[2]?.props.flexGrow).toBeGreaterThan(0)
+  await ui.unmount()
 })

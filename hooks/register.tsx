@@ -65,7 +65,7 @@ const PERFORMANCE: Record<Activity, Performance> = {
   reading: { loop: 'read', alt: 'Clawd reads a book, turning the pages' },
   searching: { loop: 'search', alt: 'Clawd searches with a magnifying glass' },
   editing: { loop: 'laptop', alt: 'Clawd types on a laptop' },
-  running: { loop: 'crabwalk', alt: 'Clawd scuttles on the spot while a command runs' },
+  running: { loop: 'crabwalk', alt: 'Clawd scuttles briskly back and forth while a command runs' },
   waiting: { loop: 'sway', alt: 'Clawd sways from side to side while waiting for you' },
   done: { intro: 'dance', loop: 'look', alt: 'Clawd weaves through a crab dance, raising the claw on the side it rises to, then looks around' },
   interrupted: { loop: 'look', alt: 'Clawd stops and looks around' },
@@ -90,6 +90,14 @@ const SETTLE_TICKS = 15
 // walking moves it this share of the room beside it: about 14px a second on
 // a 700px band, two-fifths of its own width, as the official patrol does.
 const STROLL_STEP = 0.002
+// While a command runs, Clawd scuttles the band in the desktop app's crab
+// walk instead: two and a half times as fast, with no stops to look around,
+// and a quick about-face on the spot at either end.
+const SCUTTLE_STEP = 0.005
+// The crab walk's stepping frames, and the standing frame after them.
+const SCUTTLE_LOOP = 16
+const SCUTTLE_STAND = 16
+const FLIP_FRAMES = 2
 // The official walk: frames before WALK_LOOP get going, the loop repeats up
 // to WALK_STOP, and the frames after it settle back into the standing pose.
 const WALK_LOOP = 8
@@ -104,6 +112,9 @@ const walkTicks = () => Math.round((2200 + 2400 * Math.random()) / TICK_MS)
 const STRETCH_BREAKS = new Set(
   CLIPS.stretch.frames.flatMap((f, i) => (i > 0 && f.join() === CLIPS.stretch.frames[0]?.join() ? [i] : [])),
 )
+
+// Beside other rows, Clawd keeps this share of the band to walk in.
+const LANE = '30%'
 
 const WIDTH = CLIP_BOX.width * APP_SCALE
 const HEIGHT = CLIP_BOX.height * APP_SCALE
@@ -176,7 +187,10 @@ const picture = ({ name, index }: Frame, alt: string, at = 0, mirrored = false):
   }
 }
 
-type Patrol = { step: 'start' | 'walk' | 'turn' | 'stop' | 'look'; since: number; until: number }
+type Patrol = { step: 'start' | 'walk' | 'turn' | 'stop' | 'look' | 'scuttle' | 'flip'; since: number; until: number }
+
+// The activities Clawd acts out on the move, and the first step of each.
+const GAIT: Partial<Record<Activity, Patrol['step']>> = { thinking: 'start', running: 'scuttle' }
 
 // Where Clawd is in its patrol, and the frame that shows. Every step but the
 // look keeps Clawd side-on, so it can stop or turn from any of them.
@@ -194,6 +208,10 @@ const patrolFrame = ({ step, since }: Patrol): Frame => {
       return { name: 'walk', index: Math.min(WALK_STOP + f, CLIPS.walk.frames.length - 1) }
     case 'look':
       return { name: 'look', index: Math.min(f, CLIPS.look.frames.length - 1) }
+    case 'scuttle':
+      return { name: 'crabwalk', index: f % SCUTTLE_LOOP }
+    case 'flip':
+      return { name: 'crabwalk', index: SCUTTLE_STAND }
   }
 }
 
@@ -211,6 +229,10 @@ const stepDone = ({ step, since, until }: Patrol): boolean => {
       return f >= CLIPS.walk.frames.length - WALK_STOP
     case 'look':
       return f >= CLIPS.look.frames.length
+    case 'scuttle':
+      return false
+    case 'flip':
+      return f >= FLIP_FRAMES
   }
 }
 
@@ -225,6 +247,9 @@ const nextStep = (p: Patrol): Patrol => {
       return { step: 'look', since: tick, until: tick }
     case 'look':
       return { step: 'start', since: tick, until: tick }
+    case 'scuttle':
+    case 'flip':
+      return { step: 'scuttle', since: tick, until: tick }
   }
 }
 
@@ -252,17 +277,19 @@ const framesSince = (since: number) => Math.floor(((tick - since) * TICK_MS * FP
 
 // One tick of the patrol: walk on, turn at an end, or move to the next step.
 const patrolTick = (): { frame: Frame; mirrored: boolean } => {
-  if (patrol.step === 'walk' && !stepDone(patrol)) {
-    const next = place.at + place.heading * STROLL_STEP
+  const moving = patrol.step === 'walk' || patrol.step === 'scuttle'
+
+  if (moving && !stepDone(patrol)) {
+    const next = place.at + place.heading * (patrol.step === 'walk' ? STROLL_STEP : SCUTTLE_STEP)
 
     if (next >= 1 || next <= 0) {
       place = { at: Math.min(Math.max(next, 0), 1), heading: place.heading }
-      patrol = { step: 'turn', since: tick, until: patrol.until }
+      patrol = { step: patrol.step === 'walk' ? 'turn' : 'flip', since: tick, until: patrol.until }
     } else {
       place = { at: next, heading: place.heading }
     }
   } else if (stepDone(patrol)) {
-    if (patrol.step === 'turn') {
+    if (patrol.step === 'turn' || patrol.step === 'flip') {
       place = { at: place.at, heading: place.heading === 1 ? -1 : 1 }
     }
     patrol = nextStep(patrol)
@@ -277,7 +304,9 @@ const patrolTick = (): { frame: Frame; mirrored: boolean } => {
 const leavingPatrol = (): Frame[] =>
   patrol.step === 'look'
     ? []
-    : Array.from({ length: CLIPS.walk.frames.length - WALK_STOP }, (_, i) => ({ name: 'walk' as const, index: WALK_STOP + i }))
+    : patrol.step === 'scuttle' || patrol.step === 'flip'
+      ? [{ name: 'crabwalk' as const, index: SCUTTLE_STAND }]
+      : Array.from({ length: CLIPS.walk.frames.length - WALK_STOP }, (_, i) => ({ name: 'walk' as const, index: WALK_STOP + i }))
 
 const advance = (): Picture => {
   if (calm !== undefined && tick >= calm) {
@@ -308,7 +337,7 @@ const advance = (): Picture => {
     exit = undefined
     scene = { activity, since: tick }
   }
-  if (!held && exit === undefined && scene.activity !== activity && scene.activity === 'thinking') {
+  if (!held && exit === undefined && scene.activity !== activity && GAIT[scene.activity] !== undefined) {
     const frames = leavingPatrol()
     exit = frames.length > 0 ? { frames, since: tick } : undefined
     scene = exit === undefined ? { activity, since: tick } : scene
@@ -331,19 +360,21 @@ const advance = (): Picture => {
     scene = exit === undefined ? { activity, since: tick } : scene
   }
 
-  // A fresh thinking scene starts its patrol by getting going.
-  if (scene.activity === 'thinking' && patrolling !== scene) {
+  // A fresh scene on the move starts its patrol: a stroll by getting going,
+  // a scuttle straight away.
+  const gait = GAIT[scene.activity]
+  if (gait !== undefined && patrolling !== scene) {
     patrolling = scene
-    patrol = { step: 'start', since: tick, until: tick }
+    patrol = { step: gait, since: tick, until: tick }
   }
 
   const { alt } = PERFORMANCE[scene.activity]
   const exiting = exit?.frames[framesSince(exit.since)]
 
   if (exiting !== undefined) {
-    return picture(exiting, alt, place.at, exiting.name === 'walk' && place.heading < 0)
+    return picture(exiting, alt, place.at, (exiting.name === 'walk' || exiting.name === 'crabwalk') && place.heading < 0)
   }
-  if (scene.activity === 'thinking') {
+  if (gait !== undefined) {
     const { frame, mirrored } = patrolTick()
     return picture(frame, alt, place.at, mirrored)
   }
@@ -458,23 +489,26 @@ export const register: Register = on => {
     const otherRows = e.props.rows.filter(row => row.plugin !== $.plugin.name)
     const clawd = <Svg source={now.source} alt={now.alt} width={WIDTH} height={HEIGHT} />
 
-    // With no other rows the band is Clawd's alone: the two spacers split the
-    // room around it, so `at` places it anywhere from the left end to the right.
-    if (otherRows.length === 0) {
-      const at = now.at ?? 0
+    // The two spacers split the room around Clawd, so `at` places it
+    // anywhere from the left end to the right: across the whole band when it
+    // has the band alone, and along a lane on the left beside other rows, so
+    // it never walks on the spot.
+    const at = now.at ?? 0
+    const lane = (
+      <Box flexDirection="row" alignItems="center" flexGrow={otherRows.length === 0 ? 1 : 0} flexShrink={0} width={otherRows.length === 0 ? undefined : LANE}>
+        <Box flexGrow={at} />
+        {clawd}
+        <Box flexGrow={1 - at} />
+      </Box>
+    )
 
-      return (
-        <Box flexDirection="row" alignItems="center">
-          <Box flexGrow={at} />
-          {clawd}
-          <Box flexGrow={1 - at} />
-        </Box>
-      )
+    if (otherRows.length === 0) {
+      return <Box flexDirection="row" alignItems="center">{lane}</Box>
     }
 
     return (
       <Box flexDirection="row" alignItems="center" gap={1}>
-        {clawd}
+        {lane}
         <Box flexDirection="column" flexGrow={1}>
           {await next({ ...e, props: { ...e.props, rows: otherRows } })}
         </Box>
