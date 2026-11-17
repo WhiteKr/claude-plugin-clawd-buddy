@@ -8,7 +8,8 @@ A clip is an intro (frames before loopFrom) that plays once, a loop (loopFrom
 up to outroFrom), and an outro (outroFrom to the end) that plays on the way to
 another clip, so every clip starts and ends in the same standing pose.
 
-walk, laptop, snooze and stretch are pixel art in art/<clip>.txt: the clip's
+walk, turn, look, laptop, snooze and sway are pixel art in art/<clip>.txt,
+copied cell for cell from the official Clawd animations: the clip's
 loopFrom and outroFrom, the pose each frame shows, then the poses. read and
 search are drawn below; they take a prop out with the laptop clip's pull-out
 and put it away with its put-away, the laptop swapped for that prop.
@@ -23,7 +24,7 @@ import sys
 COLS, ROWS = 37, 23
 X0, Y0, CELL = 586, 701, 50
 FPS = 12
-COLOR = {'O': '#d97757', 'D': '#be694d', 'K': '#000000', 'G': '#8b8b8b', 'W': '#f3eee3'}
+COLOR = {'O': '#d97757', 'D': '#be684d', 'K': '#141413', 'G': '#8b8b8b', 'W': '#f3eee3'}
 
 
 class Grid:
@@ -109,8 +110,10 @@ def magnifier(g, gray):
     lens(g, cx, cy)
 
 
-# Clawd's arms are rigid round claws: they move around the body whole, and
-# turn dark where they cross in front of it, as in the original clips.
+# Clawd's arms are rigid claws: they move around the body whole. Where one
+# crosses in front of the body it stays body-colored and only its top and
+# bottom edges turn dark, as the arm holding the pencil in the official
+# Notebook act.
 BODY = (7, 7, 22, 18)
 
 
@@ -132,8 +135,9 @@ def front_claw(g, x, y):
     cells = [(x + i, y + j) for i in range(4) for j in range(4)]
     x0, y0, x1, y1 = BODY
     over_body = any(g.cells.get((cx, cy)) == 'O' and x0 <= cx <= x1 and y0 <= cy <= y1 for cx, cy in cells)
-    for cell in cells:
-        g.cells[cell] = 'D' if over_body else 'O'
+    for cx, cy in cells:
+        edge = over_body and cy in (y, y + 3) and x0 <= cx <= x1 and y0 <= cy <= y1
+        g.cells[(cx, cy)] = 'D' if edge else 'O'
 
 
 def standing():
@@ -289,65 +293,65 @@ def searching():
     return frames, loop_from, outro_from
 
 
-# Crab dance (꽃게춤): Clawd bobs and weaves on the spot with its feet planted,
-# the body tracing a small U: up on the left, ducking through the middle, up
-# on the right and back. The claw on the rising side is pumped high while the
-# other sits a little raised. The claws keep their shape and only move, as
-# elsewhere.
+# Crab dance (꽃게춤): Clawd bobs on the spot with its feet planted and pumps
+# one claw above its head, then the other. Every part follows the official
+# acts: a raised claw is the clawd-waving arm (two body-colored rows over one
+# dark underside, joined to the body by a step), the other claw stays in the
+# arm band, a squat shortens the legs with a dark top row as in JumpingHappy,
+# the eyes squint to a 3x1 line on the way down as in Dancing, and turn to
+# happy arcs while the claw is up as in Excited.
 
-CLAW_ROW = {'up': 5, 'mid': 9}
+def dance_eyes(g, top, eye):
+    for left in (True, False):
+        if eye == 'open':
+            x = 9 if left else 19
+            g.fill(x, top + 2, x + 1, top + 3, 'K')
+        elif eye == 'squint':
+            x = 9 if left else 18
+            g.fill(x, top + 3, x + 2, top + 3, 'K')
+        else:
+            x = 9 if left else 17
+            g.fill(x + 1, top + 2, x + 2, top + 2, 'K')
+            g.cells[(x, top + 3)] = 'K'
+            g.cells[(x + 3, top + 3)] = 'K'
 
 
-def dance_frame(dy, dx=0, up=None, eye='open'):
-    """dy lifts (-1) or squats (+1) the body and dx sways it sideways, over
-    feet that stay where they stand. A swayed body also tilts up on that side,
-    with the raised claw, drawn as in the stretch clip: the top steps up on the
-    raised side and is cut on the other, whose edge turns dark, and the eye on
-    the raised side rides a row higher."""
+def dance_frame(dy, up=None, eye='open'):
+    """dy lifts (-1) or squats (+1) the body over feet that stay planted;
+    up raises the left or right claw over the head."""
     g = Grid()
-    g.fill(7, 7 + dy, 22, 18 + dy, 'O')
-    low, high = (22, 9) if dx < 0 else (7, 19)
-    if dx:
-        raised, cut = ((7, 14), (19, 22)) if dx < 0 else ((15, 22), (7, 10))
-        g.fill(raised[0], 6 + dy, raised[1], 6 + dy, 'O')
-        g.clear(cut[0], 7 + dy, cut[1], 7 + dy)
-        g.fill(low, 8 + dy, low, 18 + dy, 'D')
-    # The raised claw reaches a row higher again when its side of the body tilts up.
-    reach = 1 if dx else 0
-    left = CLAW_ROW['up'] - reach if up == 'left' else CLAW_ROW['mid']
-    right = CLAW_ROW['up'] - reach if up == 'right' else CLAW_ROW['mid']
-    g.fill(3, left + dy, 6, left + 3 + dy, 'O')
-    g.fill(23, right + dy, 26, right + 3 + dy, 'O')
-    for x in (9, 19):
-        lift = 1 if dx and x == high else 0
-        g.fill(x, (9 if eye == 'open' else 10) + dy - lift, x + 1, 10 + dy - lift, 'K')
-    g.cells = {(x + dx, y): c for (x, y), c in g.cells.items()}
-    # Legs stay straight 2-wide columns, as in the other clips: when the body
-    # sways, the upper half follows it and one 3-wide row joins it to feet
-    # that never move, like the knee in the stretch clip.
-    top = 19 + dy
-    knee = top + (ROWS - 1 - top) // 2
+    top = 7 + dy
+    g.fill(7, top, 22, top + 11, 'O')
+    for side, (arm, step) in {'left': ((3, 6), (7, 14)), 'right': ((23, 26), (15, 22))}.items():
+        if up == side:
+            claw = (7, 10) if side == 'left' else (19, 22)
+            g.fill(step[0], top - 1, step[1], top - 1, 'O')
+            g.fill(claw[0], top - 2, claw[1], top - 2, 'D')
+            g.fill(claw[0], top - 4, claw[1], top - 3, 'O')
+        else:
+            g.fill(arm[0], top + 4, arm[1], top + 7, 'O')
+    dance_eyes(g, top, eye)
     for x in (7, 11, 17, 21):
-        g.fill(x + dx, top, x + 1 + dx, knee - 1, 'O')
-        g.fill(min(x, x + dx), knee, max(x, x + dx) + 1, knee, 'O')
-        g.fill(x, knee + 1, x + 1, ROWS - 1, 'O')
+        g.fill(x, top + 12, x + 1, ROWS - 1, 'O')
+        if dy > 0:
+            g.fill(x, top + 12, x + 1, top + 12, 'D')
     return g
 
 
 def dance():
-    frames = [dance_frame(0)]
+    frames = [standing(), dance_frame(1, eye='squint')]
     loop_from = len(frames)
     for beat in range(8):
-        side, s = ('left', -1) if beat % 2 == 0 else ('right', 1)
-        frames += [dance_frame(1, eye='blink'), dance_frame(1, eye='blink'), dance_frame(0, s, side),
-                   dance_frame(-1, s, side), dance_frame(-1, s, side), dance_frame(0, s, side)]
+        side = 'left' if beat % 2 == 0 else 'right'
+        frames += [dance_frame(1, eye='squint'), dance_frame(0, side, 'happy'), dance_frame(-1, side, 'happy'),
+                   dance_frame(-1, side, 'happy'), dance_frame(0, side, 'happy'), dance_frame(1, eye='squint')]
     outro_from = len(frames)
-    frames += [dance_frame(1, eye='blink'), dance_frame(0), standing(), standing()]
+    frames += [dance_frame(0), standing(), standing(), standing()]
     return frames, loop_from, outro_from
 
 
 # Each clip returns its frames, where its loop starts, and where its outro starts.
-CLIPS = {name: (lambda name=name: art(name)) for name in ('walk', 'laptop', 'snooze', 'stretch')}
+CLIPS = {name: (lambda name=name: art(name)) for name in ('walk', 'turn', 'look', 'laptop', 'snooze', 'sway')}
 CLIPS.update({'read': reading, 'search': searching, 'dance': dance})
 
 
@@ -404,6 +408,9 @@ if __name__ == '__main__':
         f"export type ClawdClip = {' | '.join(repr(n) for n in CLIPS)}",
         '',
         f'export const FPS = {FPS}',
+        '',
+        "// The standing body's centre line, which walking left mirrors about.",
+        f'export const CLAWD_AXIS = {X0 + (BODY[0] + BODY[2] + 1) * CELL // 2}',
         '',
         f'export const CLIP_BOX = {{ x: {X0 + left * CELL}, y: {Y0 + top * CELL}, width: {(right - left) * CELL}, height: {(bottom - top) * CELL} }} as const',
         '',

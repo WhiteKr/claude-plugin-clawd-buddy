@@ -1,7 +1,7 @@
 import type { Register } from 'claude-code'
 
 import type { Activity, Picture } from '../types'
-import { CLIP_BOX, CLIPS, FPS } from './clawd-clips'
+import { CLAWD_AXIS, CLIP_BOX, CLIPS, FPS } from './clawd-clips'
 import type { ClawdClip } from './clawd-clips'
 
 const PICTURE = { plugin: 'clawd-buddy', key: 'picture' } as const
@@ -57,15 +57,24 @@ const PERFORMANCE: Record<Activity, Performance> = {
   searching: { loop: 'search', alt: 'Clawd searches with a magnifying glass' },
   editing: { loop: 'laptop', alt: 'Clawd types on a laptop' },
   running: { loop: 'laptop', alt: 'Clawd runs a command on a laptop' },
-  waiting: { loop: 'stretch', alt: 'Clawd stretches while waiting for you' },
+  waiting: { loop: 'sway', alt: 'Clawd sways from side to side while waiting for you' },
   done: { intro: 'dance', loop: 'snooze', alt: 'Clawd does a little crab dance, done, then dozes off' },
 }
 
-// Alone in the band, Clawd strolls across it while thinking: each tick moves
-// it this share of the room beside it, about 48px a second on a 700px band.
-const STROLL_STEP = 0.007
-// Walk frames from here on are the outro's standing pose: Clawd stops there.
-const STRIDES = 16
+// Alone in the band, Clawd patrols it while thinking, as on claude.dev: it
+// walks a while, stops to look around, and turns at either end. Each tick
+// walking moves it this share of the room beside it: about 14px a second on
+// a 700px band, two-fifths of its own width, as the official patrol does.
+const STROLL_STEP = 0.002
+// The official walk: frames before WALK_LOOP get going, the loop repeats up
+// to WALK_STOP, and the frames after it settle back into the standing pose.
+const WALK_LOOP = 8
+const WALK_STOP = 23
+// The Turning act from facing right, through a front squat, to facing left.
+const TURN_FROM = 15
+const TURN_TO = 22
+// How long a stretch of walking lasts, in ticks: 2.2 to 4.6 seconds.
+const walkTicks = () => Math.round((2200 + 2400 * Math.random()) / TICK_MS)
 
 const WIDTH = CLIP_BOX.width * APP_SCALE
 const HEIGHT = CLIP_BOX.height * APP_SCALE
@@ -114,12 +123,13 @@ const carryOn = ({ intro, loop }: Performance, { name, index }: Frame): number |
 
 // The desktop strips CSS animation from plugin SVG while it composites in
 // software, so each frame is drawn still and the tick steps them.
-// A stroll to the left mirrors the walk, so Clawd faces the way it goes.
+// Walking left mirrors the walk about Clawd's own centre line, so it faces
+// the way it goes without shifting on the spot.
 const picture = ({ name, index }: Frame, alt: string, at = 0, mirrored = false): Picture => {
   const { groups, frames } = CLIPS[name]
   const drawn = (frames[index] ?? []).map(g => groups[g]).join('')
   const markup = mirrored
-    ? `<g transform="translate(${2 * CLIP_BOX.x + CLIP_BOX.width} 0) scale(-1 1)">${drawn}</g>`
+    ? `<g transform="translate(${2 * CLAWD_AXIS} 0) scale(-1 1)">${drawn}</g>`
     : drawn
 
   return {
@@ -129,16 +139,56 @@ const picture = ({ name, index }: Frame, alt: string, at = 0, mirrored = false):
   }
 }
 
-const strolling = ({ name, index }: Frame) => name === 'walk' && index < STRIDES
+type Patrol = { step: 'start' | 'walk' | 'turn' | 'stop' | 'look'; since: number; until: number }
 
-// Steps along the band, turning at either end. `at` is the share of the room
-// left of Clawd, from 0 at the left end to 1 at the right.
-const stroll = (at: number, heading: 1 | -1): { at: number; heading: 1 | -1 } => {
-  const next = at + heading * STROLL_STEP
+// Where Clawd is in its patrol, and the frame that shows. Every step but the
+// look keeps Clawd side-on, so it can stop or turn from any of them.
+const patrolFrame = ({ step, since }: Patrol): Frame => {
+  const f = framesSince(since)
 
-  if (next >= 1) return { at: 1, heading: -1 }
-  if (next <= 0) return { at: 0, heading: 1 }
-  return { at: next, heading }
+  switch (step) {
+    case 'start':
+      return { name: 'walk', index: Math.min(f, WALK_LOOP - 1) }
+    case 'walk':
+      return { name: 'walk', index: WALK_LOOP + (f % (WALK_STOP - WALK_LOOP)) }
+    case 'turn':
+      return { name: 'turn', index: Math.min(TURN_FROM + f, TURN_TO - 1) }
+    case 'stop':
+      return { name: 'walk', index: Math.min(WALK_STOP + f, CLIPS.walk.frames.length - 1) }
+    case 'look':
+      return { name: 'look', index: Math.min(f, CLIPS.look.frames.length - 1) }
+  }
+}
+
+const stepDone = ({ step, since, until }: Patrol): boolean => {
+  const f = framesSince(since)
+
+  switch (step) {
+    case 'start':
+      return f >= WALK_LOOP
+    case 'walk':
+      return tick >= until
+    case 'turn':
+      return f >= TURN_TO - TURN_FROM
+    case 'stop':
+      return f >= CLIPS.walk.frames.length - WALK_STOP
+    case 'look':
+      return f >= CLIPS.look.frames.length
+  }
+}
+
+const nextStep = (p: Patrol): Patrol => {
+  switch (p.step) {
+    case 'start':
+    case 'turn':
+      return { step: 'walk', since: tick, until: p.step === 'turn' ? p.until : tick + walkTicks() }
+    case 'walk':
+      return { step: 'stop', since: tick, until: tick }
+    case 'stop':
+      return { step: 'look', since: tick, until: tick }
+    case 'look':
+      return { step: 'start', since: tick, until: tick }
+  }
 }
 
 const running: Activity[] = []
@@ -147,6 +197,8 @@ let tick = 0
 let scene: { activity: Activity; since: number } = { activity, since: 0 }
 let exit: { frames: Frame[]; since: number } | undefined
 let place: { at: number; heading: 1 | -1 } = { at: 0, heading: 1 }
+let patrol: Patrol = { step: 'start', since: 0, until: 0 }
+let patrolling: typeof scene | undefined
 let shown = picture(playing(PERFORMANCE[activity], 0), PERFORMANCE[activity].alt)
 
 const act = (next: Activity) => {
@@ -155,10 +207,44 @@ const act = (next: Activity) => {
 
 const framesSince = (since: number) => Math.floor(((tick - since) * TICK_MS * FPS) / 1000)
 
+// One tick of the patrol: walk on, turn at an end, or move to the next step.
+const patrolTick = (): { frame: Frame; mirrored: boolean } => {
+  if (patrol.step === 'walk' && !stepDone(patrol)) {
+    const next = place.at + place.heading * STROLL_STEP
+
+    if (next >= 1 || next <= 0) {
+      place = { at: Math.min(Math.max(next, 0), 1), heading: place.heading }
+      patrol = { step: 'turn', since: tick, until: patrol.until }
+    } else {
+      place = { at: next, heading: place.heading }
+    }
+  } else if (stepDone(patrol)) {
+    if (patrol.step === 'turn') {
+      place = { at: place.at, heading: place.heading === 1 ? -1 : 1 }
+    }
+    patrol = nextStep(patrol)
+  }
+
+  // The turn is drawn from facing right to facing left, so it is mirrored
+  // when Clawd turns back from the left end.
+  return { frame: patrolFrame(patrol), mirrored: place.heading < 0 && patrol.step !== 'look' }
+}
+
+// Leaving the patrol from side-on settles into the standing pose first.
+const leavingPatrol = (): Frame[] =>
+  patrol.step === 'look'
+    ? []
+    : Array.from({ length: CLIPS.walk.frames.length - WALK_STOP }, (_, i) => ({ name: 'walk' as const, index: WALK_STOP + i }))
+
 const advance = (): Picture => {
   if (exit !== undefined && framesSince(exit.since) >= exit.frames.length) {
     exit = undefined
     scene = { activity, since: tick }
+  }
+  if (exit === undefined && scene.activity !== activity && scene.activity === 'thinking') {
+    const frames = leavingPatrol()
+    exit = frames.length > 0 ? { frames, since: tick } : undefined
+    scene = exit === undefined ? { activity, since: tick } : scene
   }
   if (exit === undefined && scene.activity !== activity) {
     const carried = carryOn(PERFORMANCE[activity], playing(PERFORMANCE[scene.activity], framesSince(scene.since)))
@@ -173,16 +259,24 @@ const advance = (): Picture => {
     scene = exit === undefined ? { activity, since: tick } : scene
   }
 
-  const { alt } = PERFORMANCE[scene.activity]
-  const frame = exit?.frames[framesSince(exit.since)] ?? playing(PERFORMANCE[scene.activity], framesSince(scene.since))
-
-  const walking = strolling(frame)
-
-  if (walking) {
-    place = stroll(place.at, place.heading)
+  // A fresh thinking scene starts its patrol by getting going.
+  if (scene.activity === 'thinking' && patrolling !== scene) {
+    patrolling = scene
+    patrol = { step: 'start', since: tick, until: tick }
   }
 
-  return picture(frame, alt, place.at, walking && place.heading < 0)
+  const { alt } = PERFORMANCE[scene.activity]
+  const exiting = exit?.frames[framesSince(exit.since)]
+
+  if (exiting !== undefined) {
+    return picture(exiting, alt, place.at, exiting.name === 'walk' && place.heading < 0)
+  }
+  if (scene.activity === 'thinking') {
+    const { frame, mirrored } = patrolTick()
+    return picture(frame, alt, place.at, mirrored)
+  }
+
+  return picture(playing(PERFORMANCE[scene.activity], framesSince(scene.since)), alt, place.at)
 }
 
 export const register: Register = on => {
