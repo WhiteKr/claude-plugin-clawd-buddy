@@ -293,52 +293,54 @@ def searching():
     return frames, loop_from, outro_from
 
 
-# Crab dance (꽃게춤), after the Korean meme: both claws up like a crab's,
-# the body weaving low through the middle and up at either side, fast and a
-# little unhinged, with the feet planted. Every part follows the official
-# acts: the two claws go up as in JumpingHappy, either splayed into a V on a
-# shoulder row or straight up, and snap between the two; the body weaves by
-# shifting its head, middle and lower bands against each other as in the
-# Dancing and Swaying acts; the eyes squint to a 3x1 line on the way down as
-# in Dancing and turn to happy arcs at the top as in Excited; a squat
-# shortens the legs with a dark top row as in JumpingHappy.
+# Crab dance (꽃게춤), after the Korean meme: the body weaves low through the
+# middle and up to either side, fast and a little unhinged, with the feet
+# planted, and the claw on the side the head rises to goes up while the
+# other drops. Every part follows the official acts: the raised claw is the
+# clawd-waving arm (two body-colored rows over one dark underside, joined to
+# the head by a step), the dropped claw sits a row low in the arm band as
+# when the Laptop act lands, the head tilts up on the raised side with that
+# eye a row higher as in Dancing, the body weaves by shifting its head,
+# middle and lower bands against each other as in Dancing and Swaying, the
+# eyes squint to a 3x1 line on the way down and turn to happy arcs at the
+# top as in Excited, and a squat shortens the legs with a dark top row as in
+# JumpingHappy.
 
-def dance_eyes(g, top, eye, dx):
-    for left in (True, False):
+def dance_eyes(g, top, eye, dx, up):
+    for side in ('left', 'right'):
+        lift = 1 if side == up else 0
+        y = top - lift
         if eye == 'open':
-            x = 9 if left else 19
-            g.fill(x + dx, top + 2, x + 1 + dx, top + 3, 'K')
+            x = 9 if side == 'left' else 19
+            g.fill(x + dx, y + 2, x + 1 + dx, y + 3, 'K')
         elif eye == 'squint':
-            x = 9 if left else 18
-            g.fill(x + dx, top + 3, x + 2 + dx, top + 3, 'K')
+            x = 9 if side == 'left' else 18
+            g.fill(x + dx, y + 3, x + 2 + dx, y + 3, 'K')
         else:
-            x = 9 if left else 17
-            g.fill(x + 1 + dx, top + 2, x + 2 + dx, top + 2, 'K')
-            g.cells[(x + dx, top + 3)] = 'K'
-            g.cells[(x + 3 + dx, top + 3)] = 'K'
+            x = 9 if side == 'left' else 17
+            g.fill(x + 1 + dx, y + 2, x + 2 + dx, y + 2, 'K')
+            g.cells[(x + dx, y + 3)] = 'K'
+            g.cells[(x + 3 + dx, y + 3)] = 'K'
 
 
-def dance_frame(dy, bands=(0, 0, 0), claws=None, eye='open'):
+def dance_frame(dy, bands=(0, 0, 0), up=None, eye='open'):
     """dy lifts (-1) or squats (+1) the body over planted feet; bands shifts
-    its head, middle and lower thirds sideways; claws is None (at the sides),
-    'v' (splayed up) or 'up' (straight up)."""
+    its head, middle and lower thirds sideways; up names the claw raised."""
     g = Grid()
     head, mid, low = bands
     top = 7 + dy
     g.fill(7 + head, top, 22 + head, top + 3, 'O')
     g.fill(7 + mid, top + 4, 22 + mid, top + 7, 'O')
     g.fill(7 + low, top + 8, 22 + low, top + 11, 'O')
-    if claws is None:
-        g.fill(3 + mid, top + 4, 6 + mid, top + 7, 'O')
-        g.fill(23 + mid, top + 4, 26 + mid, top + 7, 'O')
-    elif claws == 'v':
-        g.fill(5 + head, top - 2, 24 + head, top - 1, 'O')
-        g.fill(5 + head, top - 4, 8 + head, top - 3, 'O')
-        g.fill(21 + head, top - 4, 24 + head, top - 3, 'O')
-    else:
-        g.fill(8 + head, top - 4, 11 + head, top - 1, 'O')
-        g.fill(18 + head, top - 4, 21 + head, top - 1, 'O')
-    dance_eyes(g, top, eye, head)
+    for side, arm, claw, step in (('left', 3, 7, 7), ('right', 23, 19, 15)):
+        if side == up:
+            g.fill(step + head, top - 1, step + 7 + head, top - 1, 'O')
+            g.fill(claw + head, top - 2, claw + 3 + head, top - 2, 'D')
+            g.fill(claw + head, top - 4, claw + 3 + head, top - 3, 'O')
+        else:
+            drop = 1 if up is not None else 0
+            g.fill(arm + mid, top + 4 + drop, arm + 3 + mid, top + 7 + drop, 'O')
+    dance_eyes(g, top, eye, head, up)
     first = top + 12
     knee = first + (ROWS - 1 - first) // 2
     for x in (7, 11, 17, 21):
@@ -350,17 +352,18 @@ def dance_frame(dy, bands=(0, 0, 0), claws=None, eye='open'):
     return g
 
 
-# One weave: duck through the middle, rise to one side, duck back, rise to
-# the other. (dy, bands, claws, eye), two frames each at 12fps.
+# One weave: duck through the middle, rise to one side with that claw up,
+# duck back, rise to the other. (dy, bands, raised claw, eyes), two frames
+# each at 12fps.
 WEAVE = [
-    (1, (0, 0, 0), 'v', 'squint'),
-    (0, (-2, -1, 0), 'up', 'happy'),
-    (-1, (-3, -2, -1), 'v', 'happy'),
-    (0, (-2, -2, -1), 'up', 'happy'),
-    (1, (0, 0, 0), 'v', 'squint'),
-    (0, (2, 1, 0), 'up', 'happy'),
-    (-1, (3, 2, 1), 'v', 'happy'),
-    (0, (2, 2, 1), 'up', 'happy'),
+    (1, (0, 0, 0), None, 'squint'),
+    (0, (-2, -1, 0), 'left', 'happy'),
+    (-1, (-3, -2, -1), 'left', 'happy'),
+    (0, (-2, -2, -1), 'left', 'happy'),
+    (1, (0, 0, 0), None, 'squint'),
+    (0, (2, 1, 0), 'right', 'happy'),
+    (-1, (3, 2, 1), 'right', 'happy'),
+    (0, (2, 2, 1), 'right', 'happy'),
 ]
 
 
@@ -368,8 +371,8 @@ def dance():
     frames = [standing(), dance_frame(1, eye='squint'), dance_frame(1, eye='squint')]
     loop_from = len(frames)
     for _ in range(3):
-        for dy, bands, claws, eye in WEAVE:
-            frames += [dance_frame(dy, bands, claws, eye)] * 2
+        for dy, bands, up, eye in WEAVE:
+            frames += [dance_frame(dy, bands, up, eye)] * 2
     outro_from = len(frames)
     frames += [dance_frame(1, eye='squint'), dance_frame(0), standing(), standing()]
     return frames, loop_from, outro_from

@@ -58,7 +58,7 @@ const PERFORMANCE: Record<Activity, Performance> = {
   editing: { loop: 'laptop', alt: 'Clawd types on a laptop' },
   running: { loop: 'laptop', alt: 'Clawd runs a command on a laptop' },
   waiting: { loop: 'sway', alt: 'Clawd sways from side to side while waiting for you' },
-  done: { intro: 'dance', loop: 'snooze', alt: 'Clawd weaves through a crab dance, claws up, done, then dozes off' },
+  done: { intro: 'dance', loop: 'snooze', alt: 'Clawd weaves through a crab dance, raising the claw on the side it rises to, done, then dozes off' },
 }
 
 // Alone in the band, Clawd patrols it while thinking, as on claude.dev: it
