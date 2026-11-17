@@ -1,4 +1,4 @@
-import type { On } from 'claude-code'
+import type { On, RenderElement } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
 const band = (surface: 'desktop' | 'terminal', isWorking: boolean) =>
@@ -53,5 +53,59 @@ test('the terminal band is left alone', async ($, on) => {
   const ui = await $.ui.mount(band('terminal', false))
 
   expect(await ui.find({ type: 'Svg' })).toBeUndefined()
+  await ui.unmount()
+})
+
+const list = (rows: { plugin: string; tree: RenderElement }[] = []) =>
+  ({
+    ...band('desktop', false),
+    component: 'AbovePromptList',
+    props: { ...band('desktop', false).props, rows },
+  }) as const
+
+test('the person can pick Clawd up and carry it along the band', async ($, on) => {
+  const clock = engine(on)
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+
+  const ui = await $.ui.mount(list())
+  await ui.resize({ columns: 8, rows: 3, in: 'grab' })
+  const svg = async () => (await ui.find({ type: 'Svg' }))?.props
+  // The spacer left of Clawd grows by the share of the room it stands at.
+  const at = async () => (await ui.findAll({ type: 'Box' })).find(b => typeof b.props.flexGrow === 'number')?.props.flexGrow
+
+  await ui.pointer({ type: 'down', x: 4, y: 1, button: 'left', in: 'grab' })
+  expect((await svg())?.alt).toBe('Clawd is held up, kicking and struggling')
+
+  // The band is 80 cells and Clawd 8, so 36 cells to the right is half the room.
+  await ui.pointer({ type: 'move', x: 40, y: 1, button: 'left', in: 'grab' })
+  await clock.advance(500)
+  expect((await svg())?.alt).toBe('Clawd is held up, kicking and struggling')
+  expect(await at()).toBe(0.5)
+
+  // Clawd moved under the pointer, so the pointer is where it grabbed it again.
+  await ui.pointer({ type: 'up', x: 4, y: 1, button: 'left', in: 'grab' })
+  expect((await svg())?.alt).toBe('Clawd dozes')
+  expect(await at()).toBe(0.5)
+
+  // It never leaves the band, however far the pointer goes.
+  await ui.pointer({ type: 'down', x: 4, y: 1, button: 'left', in: 'grab' })
+  await ui.pointer({ type: 'move', x: 500, y: 1, button: 'left', in: 'grab' })
+  await ui.pointer({ type: 'up', x: 500, y: 1, button: 'left', in: 'grab' })
+  expect(await at()).toBe(1)
+  await ui.unmount()
+})
+
+test('beside other rows Clawd only struggles where it stands', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+
+  const ui = await $.ui.mount(list([{ plugin: 'other', tree: { type: 'Text', props: {}, children: ['hi'] } }]))
+  await ui.resize({ columns: 8, rows: 3, in: 'grab' })
+
+  await ui.pointer({ type: 'down', x: 4, y: 1, button: 'left', in: 'grab' })
+  await ui.pointer({ type: 'move', x: 40, y: 1, button: 'left', in: 'grab' })
+  expect((await ui.find({ type: 'Svg' }))?.props.alt).toBe('Clawd is held up, kicking and struggling')
+  await ui.pointer({ type: 'up', x: 40, y: 1, button: 'left', in: 'grab' })
+  expect((await ui.find({ type: 'Svg' }))?.props.alt).toBe('Clawd dozes')
   await ui.unmount()
 })

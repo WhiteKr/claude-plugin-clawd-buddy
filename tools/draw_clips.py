@@ -346,9 +346,42 @@ def dance():
     return frames, loop_from, outro_from
 
 
+# Held: picked up by the pointer, Clawd hangs above the floor and struggles,
+# its claws flailing in turn, its legs kicking in pairs, its eyes darting from
+# side to side and screwed shut on every other beat. The whole body jerks up a row as it kicks.
+
+def held_frame(beat):
+    flip = beat % 2
+    dy = -3 - (1 if beat in (1, 3) else 0)
+    g = Grid()
+    g.fill(7, 7 + dy, 22, 18 + dy, 'O')
+    eye = 'open' if beat in (0, 2) else 'blink'
+    look = {0: -1, 2: 1}.get(beat, 0)
+    for x in (9 + look, 19 + look):
+        g.fill(x, (9 if eye == 'open' else 10) + dy, x + 1, 10 + dy, 'K')
+    left, right = (5, 10) if flip == 0 else (10, 5)
+    g.fill(3, left + dy, 6, left + 3 + dy, 'O')
+    g.fill(23, right + dy, 26, right + 3 + dy, 'O')
+    # The legs hang straight from the body and kick outward at the knee, one
+    # pair each beat, the feet a row or two clear of the floor.
+    top = 19 + dy
+    knee = top + 2
+    for i, x in enumerate((7, 11, 17, 21)):
+        kicking = (i % 2) == flip
+        dx = (-1 if x < 15 else 1) if kicking else 0
+        g.fill(x, top, x + 1, knee - 1, 'O')
+        g.fill(x + dx, knee, x + 1 + dx, ROWS - 3 - (1 if kicking else 0), 'O')
+    return g
+
+
+def held():
+    frames = [held_frame(beat) for beat in range(4) for _ in range(2)]
+    return frames, 0, len(frames)
+
+
 # Each clip returns its frames, where its loop starts, and where its outro starts.
 CLIPS = {name: (lambda name=name: art(name)) for name in ('walk', 'laptop', 'snooze', 'stretch')}
-CLIPS.update({'read': reading, 'search': searching, 'dance': dance})
+CLIPS.update({'read': reading, 'search': searching, 'dance': dance, 'held': held})
 
 
 def runs(cells, color):
