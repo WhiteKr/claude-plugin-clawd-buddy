@@ -15,7 +15,11 @@ const APP_SCALE = 80 / 2750
 const TOOL_ACTIVITY: Record<string, Activity> = {
   Read: 'reading',
   NotebookRead: 'reading',
+  Skill: 'reading',
   WebSearch: 'searching',
+  Grep: 'searching',
+  Glob: 'searching',
+  LS: 'searching',
   WebFetch: 'searching',
   ToolSearch: 'searching',
   Edit: 'editing',
@@ -25,6 +29,11 @@ const TOOL_ACTIVITY: Record<string, Activity> = {
   Bash: 'running',
   Monitor: 'running',
   AskUserQuestion: 'waiting',
+  ExitPlanMode: 'waiting',
+  // Planning and handing work to a subagent are still thinking.
+  TodoWrite: 'thinking',
+  Agent: 'thinking',
+  Task: 'thinking',
 }
 
 const BASH_READERS = new Set(['cat', 'head', 'tail', 'less', 'more', 'bat', 'nl', 'wc', 'jq', 'file', 'stat', 'diff'])
@@ -58,8 +67,23 @@ const PERFORMANCE: Record<Activity, Performance> = {
   editing: { loop: 'laptop', alt: 'Clawd types on a laptop' },
   running: { loop: 'crabwalk', alt: 'Clawd scuttles on the spot while a command runs' },
   waiting: { loop: 'sway', alt: 'Clawd sways from side to side while waiting for you' },
-  done: { intro: 'dance', loop: 'snooze', alt: 'Clawd weaves through a crab dance, raising the claw on the side it rises to, done, then dozes off' },
+  done: { intro: 'dance', loop: 'look', alt: 'Clawd weaves through a crab dance, raising the claw on the side it rises to, then looks around' },
+  interrupted: { loop: 'look', alt: 'Clawd stops and looks around' },
 }
+
+// After a turn, Clawd stays up this many frames before it dozes off: through
+// the dance and one look around, or one look around when the turn was cut short.
+const REST_AFTER: Partial<Record<Activity, number>> = {
+  done: CLIPS.dance.frames.length + CLIPS.look.frames.length,
+  interrupted: CLIPS.look.frames.length,
+}
+
+// A scene is kept on screen at least this long, and past its intro, so a
+// tool that answers at once still gets a recognisable moment, not a flicker.
+const HOLD_MS = 1200
+// When the last tool answers, Clawd keeps at what it was doing this long
+// before it goes back to thinking, so a run of reads stays one reading.
+const SETTLE_TICKS = 15
 
 // Alone in the band, Clawd patrols it while thinking, as on claude.dev: it
 // walks a while, stops to look around, and turns at either end. Each tick
@@ -76,6 +100,11 @@ const TURN_TO = 22
 // How long a stretch of walking lasts, in ticks: 2.2 to 4.6 seconds.
 const walkTicks = () => Math.round((2200 + 2400 * Math.random()) / TICK_MS)
 
+// The frames of the stretch where Clawd stands straight between moves.
+const STRETCH_BREAKS = new Set(
+  CLIPS.stretch.frames.flatMap((f, i) => (i > 0 && f.join() === CLIPS.stretch.frames[0]?.join() ? [i] : [])),
+)
+
 const WIDTH = CLIP_BOX.width * APP_SCALE
 const HEIGHT = CLIP_BOX.height * APP_SCALE
 
@@ -84,7 +113,8 @@ type Frame = { name: ClawdClip; index: number }
 // A clip's intro plays once, then its loop repeats; its outro is only played
 // on the way out, so every clip is left in the standing pose it started from.
 const playing = ({ intro, loop }: Performance, frame: number): Frame => {
-  const introLength = intro === undefined ? 0 : CLIPS[intro].outroFrom
+  // Played once, an intro runs through its outro back to the standing pose.
+  const introLength = intro === undefined ? 0 : CLIPS[intro].frames.length
 
   if (intro !== undefined && frame < introLength) {
     return { name: intro, index: frame }
@@ -96,14 +126,21 @@ const playing = ({ intro, loop }: Performance, frame: number): Frame => {
   return { name: loop, index: f < outroFrom ? f : loopFrom + ((f - loopFrom) % (outroFrom - loopFrom)) }
 }
 
-// Leaving mid-intro plays the intro back; leaving mid-loop plays the outro.
+// Leaving mid-intro plays the intro back; leaving mid-loop plays the outro,
+// or, for a clip whose loop is the whole clip, the rest of the loop. A clip
+// played once as an intro is past its loop in its outro, and finishes it.
 const leaving = (performance: Performance, frame: number): Frame[] => {
   const { name, index } = playing(performance, frame)
   const { loopFrom, outroFrom, frames } = CLIPS[name]
+  const rest = (from: number, to: number) => Array.from({ length: Math.max(to - from, 0) }, (_, i) => from + i)
   const indexes =
     index < loopFrom
       ? Array.from({ length: index }, (_, i) => index - 1 - i)
-      : Array.from({ length: frames.length - outroFrom }, (_, i) => outroFrom + i)
+      : index >= outroFrom
+        ? rest(index + 1, frames.length)
+        : outroFrom < frames.length
+          ? rest(outroFrom, frames.length)
+          : rest(index + 1, outroFrom)
 
   return indexes.map(i => ({ name, index: i }))
 }
@@ -111,11 +148,11 @@ const leaving = (performance: Performance, frame: number): Frame[] => {
 // When the next performance plays the clip already on screen, it picks up
 // from the same frame instead of leaving and starting that clip over.
 const carryOn = ({ intro, loop }: Performance, { name, index }: Frame): number | undefined => {
-  if (name === intro && index < CLIPS[intro].outroFrom) {
+  if (name === intro) {
     return index
   }
   if (name === loop) {
-    return (intro === undefined ? 0 : CLIPS[intro].outroFrom) + index
+    return (intro === undefined ? 0 : CLIPS[intro].frames.length) + index
   }
 
   return undefined
@@ -199,11 +236,17 @@ let exit: { frames: Frame[]; since: number } | undefined
 let place: { at: number; heading: 1 | -1 } = { at: 0, heading: 1 }
 let patrol: Patrol = { step: 'start', since: 0, until: 0 }
 let patrolling: typeof scene | undefined
+let calm: number | undefined
 let shown = picture(playing(PERFORMANCE[activity], 0), PERFORMANCE[activity].alt)
 
 const act = (next: Activity) => {
   activity = next
+  calm = undefined
 }
+
+// How long the scene on screen has to stay before it may be left.
+const holdTicks = ({ intro, loop }: Performance) =>
+  Math.max(HOLD_MS, ((intro === undefined ? CLIPS[loop].loopFrom : CLIPS[intro].loopFrom) * 1000) / FPS) / TICK_MS
 
 const framesSince = (since: number) => Math.floor(((tick - since) * TICK_MS * FPS) / 1000)
 
@@ -237,23 +280,47 @@ const leavingPatrol = (): Frame[] =>
     : Array.from({ length: CLIPS.walk.frames.length - WALK_STOP }, (_, i) => ({ name: 'walk' as const, index: WALK_STOP + i }))
 
 const advance = (): Picture => {
+  if (calm !== undefined && tick >= calm) {
+    act('thinking')
+  }
+  const rest = REST_AFTER[activity]
+  if (rest !== undefined && scene.activity === activity && exit === undefined && framesSince(scene.since) >= rest) {
+    act('idle')
+  }
+  // A doze can be left at once; anything else is held for its moment.
+  const held =
+    scene.activity !== 'idle' && activity !== 'idle' && tick - scene.since < holdTicks(PERFORMANCE[scene.activity])
+
+  // Called to real work mid-stretch, Clawd breaks off the next time it
+  // stands straight; it only finishes the stretch at leisure, to think.
+  const stretching = exit?.frames[framesSince(exit.since)]
+  if (
+    exit !== undefined &&
+    stretching?.name === 'stretch' &&
+    STRETCH_BREAKS.has(stretching.index) &&
+    activity !== 'idle' &&
+    activity !== 'thinking'
+  ) {
+    exit = undefined
+    scene = { activity, since: tick }
+  }
   if (exit !== undefined && framesSince(exit.since) >= exit.frames.length) {
     exit = undefined
     scene = { activity, since: tick }
   }
-  if (exit === undefined && scene.activity !== activity && scene.activity === 'thinking') {
+  if (!held && exit === undefined && scene.activity !== activity && scene.activity === 'thinking') {
     const frames = leavingPatrol()
     exit = frames.length > 0 ? { frames, since: tick } : undefined
     scene = exit === undefined ? { activity, since: tick } : scene
   }
-  if (exit === undefined && scene.activity !== activity) {
+  if (!held && exit === undefined && scene.activity !== activity) {
     const carried = carryOn(PERFORMANCE[activity], playing(PERFORMANCE[scene.activity], framesSince(scene.since)))
 
     if (carried !== undefined) {
       scene = { activity, since: tick - ((carried + 0.5) * 1000) / (TICK_MS * FPS) }
     }
   }
-  if (exit === undefined && scene.activity !== activity) {
+  if (!held && exit === undefined && scene.activity !== activity) {
     const from = playing(PERFORMANCE[scene.activity], framesSince(scene.since))
     // Woken from a doze, Clawd stretches before it does anything else, as
     // the Clawd on the desktop app's new-session page does.
@@ -312,7 +379,9 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined) {
       running.length = 0
-      act('done')
+      // Only an answered turn earns the dance; one cut short or failed ends
+      // with Clawd stopping to look around.
+      act(e.reason === 'answer' ? 'done' : 'interrupted')
     }
 
     return next(e)
@@ -325,11 +394,42 @@ export const register: Register = on => {
     const ran = await next(e)
     running.splice(running.indexOf(doing), 1)
 
-    if (activity !== 'idle' && activity !== 'done') {
-      act(running.at(-1) ?? 'thinking')
+    if (activity !== 'idle' && activity !== 'done' && activity !== 'interrupted') {
+      const still = running.at(-1)
+
+      if (still !== undefined) {
+        act(still)
+      } else if (activity === 'waiting' && doing !== 'waiting') {
+        // Refused at the prompt: nothing ran, so back to thinking at once.
+        act('thinking')
+      } else {
+        calm = tick + SETTLE_TICKS
+      }
     }
 
     return ran
+  }).catch(($, e, next) => next(e))
+
+  // A call that has to ask for permission leaves Clawd waiting on you until
+  // you answer; once allowed, it gets on with the call.
+  on('tool.check', async ($, e, next) => {
+    const verdict = await next(e)
+
+    if (verdict.decision === 'ask' && e.tool_use_id !== undefined && running.length > 0) {
+      act('waiting')
+    }
+
+    return verdict
+  }).catch(($, e, next) => next(e))
+
+  on('tool.run', async ($, e, next) => {
+    const doing = running.at(-1)
+
+    if (activity === 'waiting' && doing !== undefined && doing !== 'waiting') {
+      act(doing)
+    }
+
+    return next(e)
   }).catch(($, e, next) => next(e))
 
   // This row reads no state: a redraw here would change the rows the list hook below
