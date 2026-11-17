@@ -64,7 +64,7 @@ const alone = {
   props: { hasSurvey: false, isCollapsed: false, isWorking: true, maxRows: 12, bodyColumns: 80, rows: [] },
 } as const
 
-test('alone in the band, Clawd patrols it: walks, stops to look around, and turns at the ends', async ($, on) => {
+test('alone in the band, Clawd roams it: walks, stops to look around, and turns wherever it likes', async ($, on) => {
   const clock = engine(on)
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
   await $.turn.start({ text: 'go', turnId: 't1' })
@@ -82,10 +82,11 @@ test('alone in the band, Clawd patrols it: walks, stops to look around, and turn
   }
 
   expect(places.every(at => at >= 0 && at <= 1)).toBe(true)
-  // It got all the way across and back, so it turned at an end.
-  // Sampled once a second, so the far end shows as within a step or two of it.
-  expect(Math.max(...places)).toBeGreaterThan(0.99)
-  expect(places.at(-1)).toBeLessThan(1)
+  // It roams freely: it doubles back away from the ends, not only at them.
+  const moves = places.slice(1).map((at, i) => at - places[i]!).filter(d => d !== 0)
+  const middleTurns = moves.filter((d, i) => i > 0 && Math.sign(d) !== Math.sign(moves[i - 1]!)).length
+  expect(middleTurns).toBeGreaterThan(3)
+  expect(Math.max(...places) - Math.min(...places)).toBeGreaterThan(0.3)
   // Some seconds it stood still to look around.
   expect(places.some((at, i) => i > 0 && at === places[i - 1])).toBe(true)
   expect(pictures.size).toBeGreaterThan(10)
@@ -144,9 +145,12 @@ test('while a command runs, Clawd scuttles the band in the crab walk, faster tha
     expect((await ui.find({ type: 'Svg' }))?.props.alt).toContain('scuttles')
     await ui.unmount()
   }
-  // It never stands still, and it crosses the band within the half minute.
-  expect(places.every((at, i) => i === 0 || at !== places[i - 1])).toBe(true)
-  expect(Math.max(...places) - Math.min(...places)).toBeGreaterThan(0.9)
+  // It keeps moving, faster than the stroll's 0.01 of the band each half
+  // second, and doubles back now and then wherever it is.
+  const steps = places.slice(1).map((at, i) => Math.abs(at - places[i]!))
+  expect(steps.filter(d => d > 0).length).toBeGreaterThan(steps.length * 0.7)
+  expect(Math.max(...steps)).toBeGreaterThan(0.02)
+  expect(Math.max(...places) - Math.min(...places)).toBeGreaterThan(0.1)
 
   finish()
   await call

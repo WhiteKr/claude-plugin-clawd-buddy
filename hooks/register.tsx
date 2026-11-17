@@ -107,6 +107,11 @@ const TURN_FROM = 15
 const TURN_TO = 22
 // How long a stretch of walking lasts, in ticks: 2.2 to 4.6 seconds.
 const walkTicks = () => Math.round((2200 + 2400 * Math.random()) / TICK_MS)
+// Clawd roams the band freely: a stretch of walking ends in a turn instead
+// of a stop this often, and a scuttle doubles back after 0.8 to 2.6 seconds,
+// not only when it reaches an end.
+const MIDWAY_TURN = 0.35
+const scuttleTicks = () => Math.round((800 + 1800 * Math.random()) / TICK_MS)
 
 // The frames of the stretch where Clawd stands straight between moves.
 const STRETCH_BREAKS = new Set(
@@ -230,7 +235,7 @@ const stepDone = ({ step, since, until }: Patrol): boolean => {
     case 'look':
       return f >= CLIPS.look.frames.length
     case 'scuttle':
-      return false
+      return tick >= until
     case 'flip':
       return f >= FLIP_FRAMES
   }
@@ -241,17 +246,30 @@ const nextStep = (p: Patrol): Patrol => {
     case 'start':
     case 'turn':
       return { step: 'walk', since: tick, until: p.step === 'turn' ? p.until : tick + walkTicks() }
+    // A stretch of walking ends in a stop to look around, or now and then in
+    // a turn to walk the other way, wherever Clawd happens to be.
     case 'walk':
-      return { step: 'stop', since: tick, until: tick }
+      return Math.random() < MIDWAY_TURN
+        ? { step: 'turn', since: tick, until: tick + walkTicks() }
+        : { step: 'stop', since: tick, until: tick }
     case 'stop':
       return { step: 'look', since: tick, until: tick }
+    // Facing front after looking around, Clawd sets off whichever way it
+    // likes, more likely towards the side with more room.
     case 'look':
+      place = { at: place.at, heading: wayToGo() }
       return { step: 'start', since: tick, until: tick }
     case 'scuttle':
+      return { step: 'flip', since: tick, until: tick + scuttleTicks() }
     case 'flip':
-      return { step: 'scuttle', since: tick, until: tick }
+      return { step: 'scuttle', since: tick, until: p.until }
   }
 }
+
+// Which way to set off: the side with more room is the likelier, but either
+// can come up anywhere in the band.
+const wayToGo = (): 1 | -1 =>
+  place.at > 0.97 ? -1 : place.at < 0.03 ? 1 : Math.random() < Math.min(Math.max(1 - place.at, 0.15), 0.85) ? 1 : -1
 
 const running: Activity[] = []
 let activity: Activity = 'idle'
@@ -365,7 +383,8 @@ const advance = (): Picture => {
   const gait = GAIT[scene.activity]
   if (gait !== undefined && patrolling !== scene) {
     patrolling = scene
-    patrol = { step: gait, since: tick, until: tick }
+    place = { at: place.at, heading: gait === 'scuttle' ? wayToGo() : place.heading }
+    patrol = { step: gait, since: tick, until: gait === 'scuttle' ? tick + scuttleTicks() : tick }
   }
 
   const { alt } = PERFORMANCE[scene.activity]
