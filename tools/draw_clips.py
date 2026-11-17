@@ -8,8 +8,9 @@ A clip is an intro (frames before loopFrom) that plays once, a loop (loopFrom
 up to outroFrom), and an outro (outroFrom to the end) that plays on the way to
 another clip, so every clip starts and ends in the same standing pose.
 
-walk, turn, look, laptop, snooze and sway are pixel art in art/<clip>.txt,
-copied cell for cell from the official Clawd animations: the clip's
+walk, turn, look, crabwalk, laptop, snooze, stretch and sway are pixel art in
+art/<clip>.txt, copied cell for cell from the official Clawd animations in the
+desktop app and on claude.dev: the clip's
 loopFrom and outroFrom, the pose each frame shows, then the poses. read and
 search are drawn below; they take a prop out with the laptop clip's pull-out
 and put it away with its put-away, the laptop swapped for that prop.
@@ -379,7 +380,7 @@ def dance():
 
 
 # Each clip returns its frames, where its loop starts, and where its outro starts.
-CLIPS = {name: (lambda name=name: art(name)) for name in ('walk', 'turn', 'look', 'laptop', 'snooze', 'sway')}
+CLIPS = {name: (lambda name=name: art(name)) for name in ('walk', 'turn', 'look', 'crabwalk', 'laptop', 'snooze', 'stretch', 'sway')}
 CLIPS.update({'read': reading, 'search': searching, 'dance': dance})
 
 

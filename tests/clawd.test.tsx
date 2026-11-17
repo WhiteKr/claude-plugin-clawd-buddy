@@ -39,8 +39,8 @@ test('Clawd lives in the band: dozing, then pacing once a turn starts', async ($
   await resting.unmount()
 
   await $.turn.start({ text: 'go', turnId: 't1' })
-  // Clawd first gets up from its doze, then starts to pace.
-  await clock.advance(1000)
+  // Clawd first gets up from its doze and stretches, then starts to pace.
+  await clock.advance(8000)
 
   const working = await $.ui.mount(band('desktop', true))
   expect((await working.find({ type: 'Svg' }))?.props.alt).toBe('Clawd paces back and forth, thinking')

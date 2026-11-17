@@ -56,7 +56,7 @@ const PERFORMANCE: Record<Activity, Performance> = {
   reading: { loop: 'read', alt: 'Clawd reads a book, turning the pages' },
   searching: { loop: 'search', alt: 'Clawd searches with a magnifying glass' },
   editing: { loop: 'laptop', alt: 'Clawd types on a laptop' },
-  running: { loop: 'laptop', alt: 'Clawd runs a command on a laptop' },
+  running: { loop: 'crabwalk', alt: 'Clawd scuttles on the spot while a command runs' },
   waiting: { loop: 'sway', alt: 'Clawd sways from side to side while waiting for you' },
   done: { intro: 'dance', loop: 'snooze', alt: 'Clawd weaves through a crab dance, raising the claw on the side it rises to, done, then dozes off' },
 }
@@ -254,7 +254,12 @@ const advance = (): Picture => {
     }
   }
   if (exit === undefined && scene.activity !== activity) {
-    const frames = leaving(PERFORMANCE[scene.activity], framesSince(scene.since))
+    const from = playing(PERFORMANCE[scene.activity], framesSince(scene.since))
+    // Woken from a doze, Clawd stretches before it does anything else, as
+    // the Clawd on the desktop app's new-session page does.
+    const waking =
+      from.name === 'snooze' ? CLIPS.stretch.frames.map((_, i) => ({ name: 'stretch' as const, index: i })) : []
+    const frames = [...leaving(PERFORMANCE[scene.activity], framesSince(scene.since)), ...waking]
     exit = frames.length > 0 ? { frames, since: tick } : undefined
     scene = exit === undefined ? { activity, since: tick } : scene
   }
