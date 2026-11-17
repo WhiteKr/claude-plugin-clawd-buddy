@@ -1,7 +1,7 @@
 import type { Register } from 'claude-code'
 
 import type { Activity, Picture } from '../types'
-import { CLIP_BOX, CLIPS, FPS } from './clawd-clips'
+import { CLAWD_AXIS, CLIP_BOX, CLIPS, FPS } from './clawd-clips'
 import type { ClawdClip } from './clawd-clips'
 
 const PICTURE = { plugin: 'clawd-buddy', key: 'picture' } as const
@@ -114,12 +114,13 @@ const carryOn = ({ intro, loop }: Performance, { name, index }: Frame): number |
 
 // The desktop strips CSS animation from plugin SVG while it composites in
 // software, so each frame is drawn still and the tick steps them.
-// A stroll to the left mirrors the walk, so Clawd faces the way it goes.
+// A stroll to the left mirrors the walk about Clawd's own centre line, so it
+// faces the way it goes without jumping sideways.
 const picture = ({ name, index }: Frame, alt: string, at = 0, mirrored = false): Picture => {
   const { groups, frames } = CLIPS[name]
   const drawn = (frames[index] ?? []).map(g => groups[g]).join('')
   const markup = mirrored
-    ? `<g transform="translate(${2 * CLIP_BOX.x + CLIP_BOX.width} 0) scale(-1 1)">${drawn}</g>`
+    ? `<g transform="translate(${2 * CLAWD_AXIS} 0) scale(-1 1)">${drawn}</g>`
     : drawn
 
   return {

@@ -55,3 +55,41 @@ test('the terminal band is left alone', async ($, on) => {
   expect(await ui.find({ type: 'Svg' })).toBeUndefined()
   await ui.unmount()
 })
+
+// Pinned at the band's left beside another plugin's row, Clawd still turns
+// round as it paces: the turned frame must sit right where the unturned one did.
+test('Clawd turns round in place', async ($, on) => {
+  const clock = engine(on)
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await $.turn.start({ text: 'go', turnId: 't1' })
+
+  const shared = {
+    ...band('desktop', true),
+    component: 'AbovePromptList',
+    props: { ...band('desktop', true).props, rows: [{ plugin: 'other', key: 'row' }] },
+  } as const
+  const span = (source: string) => {
+    const xs = [...source.matchAll(/<rect x="(\d+)" y="\d+" width="(\d+)"/g)].flatMap(([, x, w]) => [
+      Number(x),
+      Number(x) + Number(w),
+    ])
+    const mirror = source.match(/translate\((\d+(?:\.\d+)?) 0\) scale\(-1 1\)/)
+    const [left, right] = [Math.min(...xs), Math.max(...xs)]
+
+    return mirror === null ? [left, right] : [Number(mirror[1]) - right, Number(mirror[1]) - left]
+  }
+
+  const left = new Set<string>()
+  const right = new Set<string>()
+  for (let i = 0; i < 400; i += 1) {
+    await clock.advance(100)
+    const ui = await $.ui.mount(shared)
+    const source = (await ui.find({ type: 'Svg' }))?.props.source as string
+    await ui.unmount()
+
+    ;(source.includes('scale(-1 1)') ? left : right).add(span(source).join(' '))
+  }
+
+  expect(left.size).toBeGreaterThan(0)
+  expect([...left].filter(s => !right.has(s))).toEqual([])
+})
